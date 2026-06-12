@@ -246,7 +246,7 @@ Algorithm: parse with tree-sitter; walk top-level + one nesting level of named n
 - Create: `crates/stk-compress/src/config.rs`
 - Modify: `crates/stk-compress/src/lib.rs` (add `toml = "0.8"` dep)
 
-- [ ] **Step 1: Write failing unit tests** in `config.rs`:
+- [x] **Step 1: Write failing unit tests** in `config.rs`:
 
 ```rust
 #[test]
@@ -276,13 +276,13 @@ never_compress = ["**/*.md"]"#));
 }
 ```
 
-- [ ] **Step 2: Run — verify FAIL.**
+- [x] **Step 2: Run — verify FAIL.**
 
-- [ ] **Step 3: Implement** `Config` with serde-default structs exactly mirroring the spec §5 TOML (`read.{enabled, threshold_tokens, never_compress}`, `grep.{enabled, max_matches_per_file}`, `glob.{enabled, max_paths}`, `bash.enabled`, `stats.ledger`). `load_from(global: Option<&str>, project: Option<&str>)` parses each TOML and field-wise overlays project over global over defaults (each field is `Option` in the raw deserialization layer, then resolved). `load()` reads `~/.config/smalltoke/config.toml` and `<cwd>/.smalltoke.toml`. `is_excluded` builds a `globset::GlobSet` (cached with `OnceCell`). Move the placeholder `Config` from Task 3 here; `stk-hook` re-exports it.
+- [x] **Step 3: Implement** `Config` with serde-default structs exactly mirroring the spec §5 TOML (`read.{enabled, threshold_tokens, never_compress}`, `grep.{enabled, max_matches_per_file}`, `glob.{enabled, max_paths}`, `bash.enabled`, `stats.ledger`). `load_from(global: Option<&str>, project: Option<&str>)` parses each TOML and field-wise overlays project over global over defaults (each field is `Option` in the raw deserialization layer, then resolved). `load()` reads `~/.config/smalltoke/config.toml` and `<cwd>/.smalltoke.toml`. `is_excluded` builds a `globset::GlobSet` (cached with `OnceCell`). Move the placeholder `Config` from Task 3 here; `stk-hook` re-exports it.
 
-- [ ] **Step 4: Run — verify PASS.**
+- [x] **Step 4: Run — verify PASS.**
 
-- [ ] **Step 5: Commit** — `git commit -m "Layered TOML config"`
+- [x] **Step 5: Commit** — `git commit -m "Layered TOML config"`
 
 ---
 

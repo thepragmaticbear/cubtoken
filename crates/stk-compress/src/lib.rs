@@ -1,3 +1,3 @@
-/// Placeholder; fleshed out with TOML loading in Task 5.
-#[derive(Debug, Default, Clone)]
-pub struct Config;
+pub mod config;
+
+pub use config::Config;

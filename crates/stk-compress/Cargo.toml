@@ -9,3 +9,4 @@ serde.workspace = true
 serde_json.workspace = true
 globset = "0.4"
 stk-sitter = { path = "../stk-sitter" }
+toml = "1.1.2"
