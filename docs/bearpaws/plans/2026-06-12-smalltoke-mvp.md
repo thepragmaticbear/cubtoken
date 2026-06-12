@@ -557,7 +557,7 @@ fn small_listing_passes_through() {
 - Create: `crates/stk-compress/src/bash.rs`
 - Modify: `crates/stk-hook/src/lib.rs`, `crates/stk-cli/src/doctor.rs`
 
-- [ ] **Step 1: Write failing tests:**
+- [x] **Step 1: Write failing tests:**
 
 ```rust
 #[test]
@@ -584,13 +584,13 @@ fn disabled_by_default() {
 }
 ```
 
-- [ ] **Step 2: Run — verify FAIL.**
+- [x] **Step 2: Run — verify FAIL.**
 
-- [ ] **Step 3: Implement** `strip`: regex ANSI removal, split on `\r` keeping final segment per carriage-return run, collapse consecutive near-duplicate lines (same prefix before first digit) to last + `(repeated xN)`, collapse blank runs. Gate in dispatch: only when `cfg.bash.enabled` **and** exit code is 0/absent **and** stderr empty. `stk init` writes `bash.enabled = false` with a comment `# set true if you don't use rtk`; `doctor` reports rtk detection.
+- [x] **Step 3: Implement** `strip`: regex ANSI removal, split on `\r` keeping final segment per carriage-return run, collapse consecutive near-duplicate lines (same prefix before first digit) to last + `(repeated xN)`, collapse blank runs. Gate in dispatch: only when `cfg.bash.enabled` **and** exit code is 0/absent **and** stderr empty. `stk init` writes `bash.enabled = false` with a comment `# set true if you don't use rtk`; `doctor` reports rtk detection.
 
-- [ ] **Step 4: Run — verify PASS.**
+- [x] **Step 4: Run — verify PASS.**
 
-- [ ] **Step 5: Commit** — `git commit -m "Opt-in Bash noise strip with rtk coexistence"`
+- [x] **Step 5: Commit** — `git commit -m "Opt-in Bash noise strip with rtk coexistence"`
 
 ---
 

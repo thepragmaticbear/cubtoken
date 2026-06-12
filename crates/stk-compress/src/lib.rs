@@ -1,3 +1,4 @@
+pub mod bash;
 pub mod config;
 pub mod estimate;
 pub mod glob_fold;
