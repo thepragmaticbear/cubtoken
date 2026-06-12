@@ -1,7 +1,7 @@
 # smalltoke — Running Handoff Doc
 
 > **Purpose:** If this session dies (rate limit, crash), a fresh session resumes from this file.
-> **Last updated:** 2026-06-12 (update this line + the checklist on every task completion)
+> **Last updated:** 2026-06-12, after Task 6 (update this line + the checklist on every task completion)
 
 ## How to resume
 
@@ -26,7 +26,7 @@
 - [x] Task 3: Hook protocol types and fail-open runner
 - [x] Task 4: tree-sitter signature skeleton (stk-sitter)
 - [x] Task 5: Config loading (stk-compress)
-- [ ] Task 6: Read compressor end-to-end  ← *includes live-session validation decision point*
+- [x] Task 6: Read compressor end-to-end — **live-session validation PASSED** (headless probe confirmed the model receives the substituted skeleton)
 - [ ] Task 7: Session ledger (edit protection + savings)
 - [ ] Task 8: stk init + stk doctor
 - [ ] Task 9: stk stats
@@ -49,7 +49,7 @@
 ## Blockers / manual steps pending
 
 - ~~Task 2 fixture capture~~ **RESOLVED:** headless `claude -p` (haiku, temp project `/tmp/stk-capture`, recorder hook pre-installed in its settings) captured all five payloads. This headless-capture trick is reusable for any future schema question.
-- **Task 6 validation decision point:** after wiring, confirm in a live session that Read output substitution actually reaches the model (docs example shows Bash). If unsupported → STOP, reassess with Brandon (fallback sketch in plan self-review notes).
+- ~~Task 6 validation decision point~~ **RESOLVED:** live headless probe — agent read big.rs through the installed hook and reported COMPRESSED. `updatedToolOutput` substitution works for Read.
 
 ## Current state notes
 

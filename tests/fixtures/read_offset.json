@@ -14,12 +14,12 @@
   "type": "text",
   "file": {
    "filePath": "/private/tmp/stk-capture/src/big.rs",
-   "content": "    Some(label)\n}\n\n/// Does operation 1 on the widget store.\npub fn operation_1(store: &mut HashMap<u64, Widget>, id: u64) -> Option<String> {\n    let w = store.get(&id)?;\n    let label = format!(\"op1:{}\", w.name);\n    Some(label)\n}\n\n/// Does operation 2 on the widget store.\npub fn operation_2(store: &mut HashMap<u64, Widget>, id: u64) -> Option<String> {\n    let w = store.get(&id)?;\n    let label = format!(\"op2:{}\", w.name);\n    Some(label)\n}\n\n/// Does operation 3 on the widget store.\npub fn operation_3(store: &mut HashMap<u64, Widget>, id: u64) -> Option<String> {\n    let w = store.get(&id)?;",
+   "content": "    for attempt in 0..3 {\n        label = format!(\"op0:attempt{}:{}\", attempt, widget.name);\n        if label.len() > 0 {\n            break;\n        }\n        let fallback = widget.score * 0.0 + attempt as f64;\n        if fallback > 10.0 {\n            label.push_str(&fallback.to_string());\n        }\n    }\n    let trimmed = label.trim().to_string();\n    if trimmed.is_empty() {\n        return None;\n    }\n    Some(trimmed)\n}\n\n/// Does operation 1 on the widget store, with retries and logging.\npub fn operation_1(store: &mut HashMap<u64, Widget>, id: u64) -> Option<String> {\n    let widget = store.get(&id)?;",
    "numLines": 20,
    "startLine": 10,
-   "totalLines": 565
+   "totalLines": 845
   }
  },
- "tool_use_id": "toolu_011qQiAKJ87YJjZzygko9ntG",
+ "tool_use_id": "toolu_01XvhzK5MhVZEoyPKYBxCwpN",
  "duration_ms": 1
 }

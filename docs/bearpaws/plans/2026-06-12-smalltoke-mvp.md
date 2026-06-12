@@ -293,7 +293,7 @@ never_compress = ["**/*.md"]"#));
 - Modify: `crates/stk-hook/src/lib.rs` (dispatch)
 - Create: `crates/stk-hook/tests/end_to_end.rs`
 
-- [ ] **Step 1: Write failing tests.** In `estimate.rs`: `est_tokens("abcd".repeat(35)) ≈ 40` (chars/3.5, ceiling). In `read.rs` unit tests + hook end-to-end test:
+- [x] **Step 1: Write failing tests.** In `estimate.rs`: `est_tokens("abcd".repeat(35)) ≈ 40` (chars/3.5, ceiling). In `read.rs` unit tests + hook end-to-end test:
 
 ```rust
 // crates/stk-hook/tests/end_to_end.rs
@@ -329,9 +329,9 @@ fn small_read_passes_through() {
 }
 ```
 
-- [ ] **Step 2: Run — verify FAIL.**
+- [x] **Step 2: Run — verify FAIL.**
 
-- [ ] **Step 3: Implement.**
+- [x] **Step 3: Implement.**
   - `estimate.rs`: `pub fn est_tokens(s: &str) -> usize { (s.chars().count() as f32 / 3.5).ceil() as usize }`
   - `read.rs`: `pub fn compress_read(input: &Value, response: &Value, cfg: &Config) -> Option<Value>`:
     1. Extract `file_path`, `offset`, `limit` from `tool_input`; **return `None` if `offset` or `limit` present**, or path matches `never_compress`, or `!cfg.read.enabled`.
@@ -342,11 +342,11 @@ fn small_read_passes_through() {
     6. Re-wrap rendered text into the original `ContentShape` → `Some(updated_response_value)`. If the compressed form isn't at least 30% smaller, return `None` (not worth substituting).
   - `stk-hook` dispatch: `tool_name == "Read"` → `compress_read`; wrap result in `HookOutput`.
 
-- [ ] **Step 4: Run — verify PASS** (`cargo test`).
+- [x] **Step 4: Run — verify PASS** (`cargo test`).
 
-- [ ] **Step 5: Add invariant test** in `read.rs`: feed `tests/corpus/sample.rs` content through `compress_read` with a synthetic payload; assert every gutter line shown matches the source verbatim (reuse `shown_lines`), and output contains exactly one banner. Verify PASS.
+- [x] **Step 5: Add invariant test** in `read.rs`: feed `tests/corpus/sample.rs` content through `compress_read` with a synthetic payload; assert every gutter line shown matches the source verbatim (reuse `shown_lines`), and output contains exactly one banner. Verify PASS.
 
-- [ ] **Step 6: Commit** — `git commit -m "Read signature-view compression end-to-end"`
+- [x] **Step 6: Commit** — `git commit -m "Read signature-view compression end-to-end"`
 
 ---
 
