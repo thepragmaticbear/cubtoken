@@ -31,8 +31,42 @@ fn main() {
     let cli = Cli::parse();
     match cli.cmd {
         Cmd::Record { path } => record(&path),
+        Cmd::Hook => hook(),
         // Stubs: silent success until implemented (hook must never break a session)
-        Cmd::Hook | Cmd::Init { .. } | Cmd::Stats | Cmd::Doctor => {}
+        Cmd::Init { .. } | Cmd::Stats | Cmd::Doctor => {}
+    }
+}
+
+/// Fail-open wrapper: any panic or error inside the hook prints nothing and
+/// exits 0, so the original tool output passes through untouched.
+fn hook() {
+    let result = std::panic::catch_unwind(|| {
+        let mut input = String::new();
+        std::io::stdin().read_to_string(&mut input).ok()?;
+        let cfg = stk_hook::Config::default();
+        stk_hook::run_hook(&input, &cfg)
+    });
+    match result {
+        Ok(Some(json)) => println!("{json}"),
+        Ok(None) => {}
+        Err(panic) => log_error(&format!("hook panicked: {panic:?}")),
+    }
+}
+
+/// Best-effort error log; never writes to stdout/stderr (those belong to the
+/// hook protocol).
+fn log_error(msg: &str) {
+    let dir = std::path::Path::new(".smalltoke");
+    if std::fs::create_dir_all(dir).is_err() {
+        return;
+    }
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join("errors.log"))
+    {
+        use std::io::Write as _;
+        let _ = writeln!(f, "{msg}");
     }
 }
 

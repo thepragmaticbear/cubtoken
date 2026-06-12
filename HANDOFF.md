@@ -23,7 +23,7 @@
 
 - [x] Task 1: Workspace scaffold
 - [x] Task 2: Payload recorder + real fixtures *(captured autonomously via headless `claude -p`; no manual step needed)*
-- [ ] Task 3: Hook protocol types and fail-open runner
+- [x] Task 3: Hook protocol types and fail-open runner
 - [ ] Task 4: tree-sitter signature skeleton (stk-sitter)
 - [ ] Task 5: Config loading (stk-compress)
 - [ ] Task 6: Read compressor end-to-end  ← *includes live-session validation decision point*
@@ -61,4 +61,4 @@
   - `Grep` (content mode): `{mode, numFiles, filenames, content, numLines}` — content rows are `relpath:line:text`
   - `Glob`: `{filenames:[…], durationMs, numFiles, truncated}`
   - `Bash`: `{stdout, stderr, interrupted, isImage, noOutputExpected}` — **no exit-code field**; Task 12's "don't touch failing commands" gate must use stderr-nonempty as the heuristic instead.
-- Tasks 1–2 done; next: Task 3 (hook protocol + fail-open runner).
+- Tasks 1–3 done. `run_hook` dispatch in `crates/stk-hook/src/lib.rs` returns None for every tool until compressors land. CLI `stk hook` wraps it in catch_unwind, logs to `.smalltoke/errors.log`, always exits 0. Next: Task 4 (tree-sitter skeletons).
