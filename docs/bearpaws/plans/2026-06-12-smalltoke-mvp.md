@@ -401,7 +401,7 @@ fn savings_accumulate() {
 - Modify: `crates/stk-cli/src/main.rs`
 - Create: `crates/stk-cli/tests/init.rs`
 
-- [ ] **Step 1: Write failing tests** (assert_cmd + tempdir as fake project / fake `CLAUDE_CONFIG_DIR`):
+- [x] **Step 1: Write failing tests** (assert_cmd + tempdir as fake project / fake `CLAUDE_CONFIG_DIR`):
 
 ```rust
 #[test]
@@ -432,13 +432,13 @@ fn init_is_idempotent_and_preserves_existing_settings() {
 }
 ```
 
-- [ ] **Step 2: Run — verify FAIL.**
+- [x] **Step 2: Run — verify FAIL.**
 
-- [ ] **Step 3: Implement** `init.rs`: read-modify-write `.claude/settings.json` (`--global` → `~/.claude/settings.json`): parse as `Value`, ensure `hooks.PostToolUse` array, remove any prior entry whose command contains `"stk hook"`, append ours (`command: "stk hook"` — resolved to the absolute binary path via `std::env::current_exe()`), pretty-print back. Also write a starter `.smalltoke.toml` if absent. `doctor.rs`: checks and prints PASS/FAIL lines for: hook entry present; `stk` on PATH or absolute path valid; `.smalltoke/` writable; rtk present on PATH (informational: "bash compression deferred to rtk"). Exit 1 if any FAIL.
+- [x] **Step 3: Implement** `init.rs`: read-modify-write `.claude/settings.json` (`--global` → `~/.claude/settings.json`): parse as `Value`, ensure `hooks.PostToolUse` array, remove any prior entry whose command contains `"stk hook"`, append ours (`command: "stk hook"` — resolved to the absolute binary path via `std::env::current_exe()`), pretty-print back. Also write a starter `.smalltoke.toml` if absent. `doctor.rs`: checks and prints PASS/FAIL lines for: hook entry present; `stk` on PATH or absolute path valid; `.smalltoke/` writable; rtk present on PATH (informational: "bash compression deferred to rtk"). Exit 1 if any FAIL.
 
-- [ ] **Step 4: Run — verify PASS.**
+- [x] **Step 4: Run — verify PASS.**
 
-- [ ] **Step 5: Commit** — `git commit -m "stk init and stk doctor"`
+- [x] **Step 5: Commit** — `git commit -m "stk init and stk doctor"`
 
 ---
 
