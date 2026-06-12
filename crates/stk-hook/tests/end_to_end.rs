@@ -73,6 +73,29 @@ fn grep_files_mode_passes_through() {
 }
 
 #[test]
+fn glob_with_many_paths_is_folded() {
+    let mut v: serde_json::Value = serde_json::from_str(&fixture("glob_many")).unwrap();
+    let many: Vec<String> = (0..300)
+        .map(|i| format!("src/components/C{i}.tsx"))
+        .collect();
+    v["tool_response"]["filenames"] = serde_json::json!(many);
+    v["tool_response"]["numFiles"] = serde_json::json!(300);
+    let out = run_hook(&v.to_string(), &Config::default()).expect("should fold");
+    let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let folded = parsed["hookSpecificOutput"]["updatedToolOutput"]["filenames"][0]
+        .as_str()
+        .unwrap();
+    assert!(folded.contains("300 paths folded"), "{folded}");
+    assert!(folded.contains("src/components/ (300 files"), "{folded}");
+}
+
+#[test]
+fn glob_with_few_paths_passes_through() {
+    // recorded fixture has 31 files, under the 50-path default
+    assert!(run_hook(&fixture("glob_many"), &Config::default()).is_none());
+}
+
+#[test]
 fn excluded_path_passes_through() {
     let mut v: serde_json::Value = serde_json::from_str(&fixture("read_large")).unwrap();
     v["tool_input"]["file_path"] = serde_json::json!("/private/tmp/stk-capture/NOTES.md");
