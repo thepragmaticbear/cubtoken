@@ -522,7 +522,7 @@ fn few_matches_pass_through() {
 - Create: `crates/stk-compress/src/glob_fold.rs`
 - Modify: `crates/stk-hook/src/lib.rs`, `crates/stk-hook/tests/end_to_end.rs`
 
-- [ ] **Step 1: Write failing tests:**
+- [x] **Step 1: Write failing tests:**
 
 ```rust
 #[test]
@@ -541,13 +541,13 @@ fn small_listing_passes_through() {
 }
 ```
 
-- [ ] **Step 2: Run — verify FAIL.**
+- [x] **Step 2: Run — verify FAIL.**
 
-- [ ] **Step 3: Implement** `fold_paths(paths, max) -> Option<String>`: build a directory trie; render directories with ≤5 entries fully, others as `dir/ (N files, <dominant extensions>)`; banner names the count and shows `Glob(pattern=<dir>/**)` as the expansion route. Dispatch `Glob` in `run_hook`.
+- [x] **Step 3: Implement** `fold_paths(paths, max) -> Option<String>`: build a directory trie; render directories with ≤5 entries fully, others as `dir/ (N files, <dominant extensions>)`; banner names the count and shows `Glob(pattern=<dir>/**)` as the expansion route. Dispatch `Glob` in `run_hook`.
 
-- [ ] **Step 4: Run — verify PASS.**
+- [x] **Step 4: Run — verify PASS.**
 
-- [ ] **Step 5: Commit** — `git commit -m "Glob tree folding"`
+- [x] **Step 5: Commit** — `git commit -m "Glob tree folding"`
 
 ---
 

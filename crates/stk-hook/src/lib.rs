@@ -72,6 +72,28 @@ fn dispatch(payload: &HookPayload, cfg: &Config) -> Option<serde_json::Value> {
             updated["numLines"] = serde_json::Value::from(folded.lines().count());
             Some(updated)
         }
+        "Glob" => {
+            if !cfg.glob.enabled {
+                return None;
+            }
+            let filenames: Vec<String> = payload
+                .tool_response
+                .get("filenames")?
+                .as_array()?
+                .iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect();
+            let folded = stk_compress::glob_fold::fold_paths(&filenames, cfg.glob.max_paths)?;
+            if cfg.stats.ledger {
+                use stk_compress::estimate::est_tokens;
+                let orig = filenames.join("\n");
+                ledger_for(payload).note_saving("Glob", est_tokens(&orig), est_tokens(&folded));
+            }
+            let mut updated = payload.tool_response.clone();
+            updated["filenames"] = serde_json::json!([folded]);
+            updated["numFiles"] = serde_json::Value::from(1);
+            Some(updated)
+        }
         _ => None,
     }
 }
