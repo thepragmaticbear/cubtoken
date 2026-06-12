@@ -1,7 +1,7 @@
 # smalltoke — Running Handoff Doc
 
 > **Purpose:** If this session dies (rate limit, crash), a fresh session resumes from this file.
-> **Last updated:** 2026-06-12, after Task 6 (update this line + the checklist on every task completion)
+> **Last updated:** 2026-06-12 — **ALL 13 TASKS COMPLETE.** Plan fully executed; see 'Where to go next'.
 
 ## How to resume
 
@@ -34,7 +34,7 @@
 - [x] Task 10: Grep match folding
 - [x] Task 11: Glob tree folding
 - [x] Task 12: Bash noise strip + rtk detection (failure heuristic = non-empty stderr, since Bash responses carry no exit code)
-- [ ] Task 13: Release hardening (CI, README)
+- [x] Task 13: Release hardening (CI, README)
 
 ## Decision log
 
@@ -50,6 +50,12 @@
 
 - ~~Task 2 fixture capture~~ **RESOLVED:** headless `claude -p` (haiku, temp project `/tmp/stk-capture`, recorder hook pre-installed in its settings) captured all five payloads. This headless-capture trick is reusable for any future schema question.
 - ~~Task 6 validation decision point~~ **RESOLVED:** live headless probe — agent read big.rs through the installed hook and reported COMPRESSED. `updatedToolOutput` substitution works for Read.
+
+## Where to go next (post-MVP)
+
+- **Real-world dogfood:** the hook is live in this repo's `.claude/settings.local.json` from the next session. Watch `stk stats`, and especially watch for failed Edits after compressed Reads (the Edit-hazard mitigations are designed but only proven in tests + one live probe).
+- **Phase 4 decision** (spec §8): SQLite AST index + single `get_context` MCP tool — only if dogfooding shows repeated structural re-reads.
+- Smaller ideas parked: `init --local` flag (settings.local.json), more languages (Java/C/C++/Ruby), tuning `read.threshold_tokens` from ledger data, publishing to crates.io + GitHub.
 
 ## Current state notes
 
