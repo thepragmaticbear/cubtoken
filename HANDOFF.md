@@ -31,7 +31,7 @@
 - [x] Task 8: stk init + stk doctor
 - [x] Task 9: stk stats
 - [x] **Phase 1 dogfood checkpoint** — hook installed in this repo's `.claude/settings.local.json` (local because the command embeds an absolute binary path; consider an `init --local` flag later). Activates on next session start; check `stk stats` then.
-- [ ] Task 10: Grep match folding
+- [x] Task 10: Grep match folding
 - [ ] Task 11: Glob tree folding
 - [ ] Task 12: Bash noise strip + rtk detection
 - [ ] Task 13: Release hardening (CI, README)

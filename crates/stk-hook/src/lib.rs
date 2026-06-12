@@ -53,6 +53,25 @@ fn dispatch(payload: &HookPayload, cfg: &Config) -> Option<serde_json::Value> {
             }
             Some(outcome.updated_response)
         }
+        "Grep" => {
+            if !cfg.grep.enabled {
+                return None;
+            }
+            // only content mode has match rows worth folding
+            if payload.tool_response.get("mode").and_then(|m| m.as_str()) != Some("content") {
+                return None;
+            }
+            let content = payload.tool_response.get("content")?.as_str()?;
+            let folded = stk_compress::grep::fold(content, &cfg.grep)?;
+            if cfg.stats.ledger {
+                use stk_compress::estimate::est_tokens;
+                ledger_for(payload).note_saving("Grep", est_tokens(content), est_tokens(&folded));
+            }
+            let mut updated = payload.tool_response.clone();
+            updated["content"] = serde_json::Value::String(folded.clone());
+            updated["numLines"] = serde_json::Value::from(folded.lines().count());
+            Some(updated)
+        }
         _ => None,
     }
 }
