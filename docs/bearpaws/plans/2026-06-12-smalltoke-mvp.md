@@ -25,7 +25,7 @@
 - Create: `crates/stk-compress/Cargo.toml`, `crates/stk-compress/src/lib.rs`
 - Create: `crates/stk-sitter/Cargo.toml`, `crates/stk-sitter/src/lib.rs`
 
-- [ ] **Step 1: Root workspace manifest**
+- [x] **Step 1: Root workspace manifest**
 
 ```toml
 # Cargo.toml
@@ -55,7 +55,7 @@ target/
 .smalltoke/
 ```
 
-- [ ] **Step 2: Crate manifests + empty lib/main**
+- [x] **Step 2: Crate manifests + empty lib/main** *(deviation: tree-sitter deps deferred to Task 4 — see HANDOFF decision log)*
 
 Each `crates/*/Cargo.toml` declares `name`, inherits `edition.workspace = true`, `license.workspace = true`. `stk-cli` is `[[bin]] name = "stk"` depending on `clap = { version = "4", features = ["derive"] }`, `stk-hook` (path dep). `stk-hook` depends on `stk-compress` (path), `serde`, `serde_json`. `stk-compress` depends on `stk-sitter` (path), `globset = "0.4"`. `stk-sitter` depends on `tree-sitter = "0.25"` plus grammar crates (`tree-sitter-rust`, `tree-sitter-typescript`, `tree-sitter-python`, `tree-sitter-go` — pin to versions compatible with the tree-sitter core version; check crates.io at implementation time and record the pins in this file's commit).
 
@@ -69,11 +69,11 @@ fn main() {
 
 Lib crates: empty `lib.rs` files.
 
-- [ ] **Step 3: Verify build — `cargo build && cargo test`**
+- [x] **Step 3: Verify build — `cargo build && cargo test`**
 
-Expected: builds clean, zero tests pass (no tests yet).
+Expected: builds clean, zero tests pass (no tests yet). ✅ rustc 1.96.0, clean build.
 
-- [ ] **Step 4: Commit** — `git add -A && git commit -m "Scaffold cargo workspace"`
+- [x] **Step 4: Commit** — `git add -A && git commit -m "Scaffold cargo workspace"`
 
 ---
 
