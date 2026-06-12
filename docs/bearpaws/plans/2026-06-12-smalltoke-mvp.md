@@ -121,7 +121,7 @@ fn record_appends_stdin_json_to_file() {
 - Create: `crates/stk-hook/src/protocol.rs`
 - Modify: `crates/stk-hook/src/lib.rs`, `crates/stk-cli/src/main.rs`
 
-- [ ] **Step 1: Write failing tests** in `crates/stk-hook/src/protocol.rs` (unit tests parse every fixture):
+- [x] **Step 1: Write failing tests** in `crates/stk-hook/src/protocol.rs` (unit tests parse every fixture):
 
 ```rust
 #[cfg(test)]
@@ -143,9 +143,9 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Run — verify FAIL** (types don't exist).
+- [x] **Step 2: Run — verify FAIL** (types don't exist).
 
-- [ ] **Step 3: Implement.** Tolerant types — only pin down what we use, keep the rest as `Value`:
+- [x] **Step 3: Implement.** Tolerant types — only pin down what we use, keep the rest as `Value`:
 
 ```rust
 #[derive(serde::Deserialize)]
@@ -178,9 +178,9 @@ pub struct HookSpecificOutput {
 
 `lib.rs` exposes `pub fn run_hook(stdin: &str, cfg: &Config) -> Option<String>`: parse → dispatch (returns `None` for every tool for now) → serialize. `Config::default()` for now is an empty struct (fleshed out in Task 5). In `stk-cli`, `Hook` reads stdin, wraps the call in `std::panic::catch_unwind`, prints `Some(json)` or nothing, **always exits 0**; on error, appends a line to `.smalltoke/errors.log` if writable, never to stdout/stderr.
 
-- [ ] **Step 4: Run — verify PASS** (`cargo test -p stk-hook`).
+- [x] **Step 4: Run — verify PASS** (`cargo test -p stk-hook`).
 
-- [ ] **Step 5: Commit** — `git commit -m "Hook protocol types and fail-open runner"`
+- [x] **Step 5: Commit** — `git commit -m "Hook protocol types and fail-open runner"`
 
 ---
 
