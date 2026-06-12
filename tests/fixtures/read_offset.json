@@ -1,0 +1,25 @@
+{
+ "session_id": "fixture-session",
+ "transcript_path": "/tmp/fixture/transcript.jsonl",
+ "cwd": "/private/tmp/stk-capture",
+ "permission_mode": "default",
+ "hook_event_name": "PostToolUse",
+ "tool_name": "Read",
+ "tool_input": {
+  "file_path": "/private/tmp/stk-capture/src/big.rs",
+  "offset": 10,
+  "limit": 20
+ },
+ "tool_response": {
+  "type": "text",
+  "file": {
+   "filePath": "/private/tmp/stk-capture/src/big.rs",
+   "content": "    Some(label)\n}\n\n/// Does operation 1 on the widget store.\npub fn operation_1(store: &mut HashMap<u64, Widget>, id: u64) -> Option<String> {\n    let w = store.get(&id)?;\n    let label = format!(\"op1:{}\", w.name);\n    Some(label)\n}\n\n/// Does operation 2 on the widget store.\npub fn operation_2(store: &mut HashMap<u64, Widget>, id: u64) -> Option<String> {\n    let w = store.get(&id)?;\n    let label = format!(\"op2:{}\", w.name);\n    Some(label)\n}\n\n/// Does operation 3 on the widget store.\npub fn operation_3(store: &mut HashMap<u64, Widget>, id: u64) -> Option<String> {\n    let w = store.get(&id)?;",
+   "numLines": 20,
+   "startLine": 10,
+   "totalLines": 565
+  }
+ },
+ "tool_use_id": "toolu_011qQiAKJ87YJjZzygko9ntG",
+ "duration_ms": 1
+}

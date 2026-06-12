@@ -22,7 +22,7 @@
 ## Progress checklist (mirrors plan tasks)
 
 - [x] Task 1: Workspace scaffold
-- [ ] Task 2: Payload recorder + real fixtures  ← *has a manual/external step, see below*
+- [x] Task 2: Payload recorder + real fixtures *(captured autonomously via headless `claude -p`; no manual step needed)*
 - [ ] Task 3: Hook protocol types and fail-open runner
 - [ ] Task 4: tree-sitter signature skeleton (stk-sitter)
 - [ ] Task 5: Config loading (stk-compress)
@@ -48,9 +48,7 @@
 
 ## Blockers / manual steps pending
 
-- **Task 2 Step 5 (fixture capture):** hooks are snapshotted at Claude Code session startup, so a recorder hook added to `.claude/settings.json` mid-session won't fire in the *current* session. Resolution paths, in order of preference:
-  1. Drive a **headless** `claude -p` run in a temp project whose settings pre-contain the recorder hook (current session will attempt this).
-  2. If headless capture fails: Brandon restarts a session in this repo with the recorder hook installed, performs one large Read, one offset Read, one many-match Grep, one big Glob, one Bash command, then splits `tests/fixtures/raw.jsonl` into the five named fixture files (see plan Task 2 Step 5) and sanitizes paths.
+- ~~Task 2 fixture capture~~ **RESOLVED:** headless `claude -p` (haiku, temp project `/tmp/stk-capture`, recorder hook pre-installed in its settings) captured all five payloads. This headless-capture trick is reusable for any future schema question.
 - **Task 6 validation decision point:** after wiring, confirm in a live session that Read output substitution actually reaches the model (docs example shows Bash). If unsupported → STOP, reassess with Brandon (fallback sketch in plan self-review notes).
 
 ## Current state notes
@@ -58,4 +56,9 @@
 (keep this section current — what's half-done, surprising findings, anything a fresh session can't infer from git)
 
 - **Environment:** Rust was not installed on this machine; installed via `brew install rustup` + `rustup default stable` (rustc 1.96.0). cargo lives at `~/.cargo/bin` — shells may need `export PATH="$HOME/.cargo/bin:$PATH"`.
-- Task 1 done; starting Task 2 (recorder + fixtures).
+- **Real `tool_response` schemas** (from fixtures, the ground truth for `extract_content`):
+  - `Read`: `{type:"text", file:{filePath, content, numLines, startLine, totalLines}}`
+  - `Grep` (content mode): `{mode, numFiles, filenames, content, numLines}` — content rows are `relpath:line:text`
+  - `Glob`: `{filenames:[…], durationMs, numFiles, truncated}`
+  - `Bash`: `{stdout, stderr, interrupted, isImage, noOutputExpected}` — **no exit-code field**; Task 12's "don't touch failing commands" gate must use stderr-nonempty as the heuristic instead.
+- Tasks 1–2 done; next: Task 3 (hook protocol + fail-open runner).
