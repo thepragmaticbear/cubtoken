@@ -1,5 +1,6 @@
 mod doctor;
 mod init;
+mod stats;
 
 use std::io::Read as _;
 use std::path::PathBuf;
@@ -46,8 +47,7 @@ fn main() {
                 std::process::exit(1);
             }
         }
-        // Stub until Task 9
-        Cmd::Stats => {}
+        Cmd::Stats => stats::run(),
     }
 }
 

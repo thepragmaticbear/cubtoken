@@ -29,7 +29,7 @@
 - [x] Task 6: Read compressor end-to-end — **live-session validation PASSED** (headless probe confirmed the model receives the substituted skeleton)
 - [x] Task 7: Session ledger (edit protection + savings; protection is always-on, only savings recording is gated by stats.ledger)
 - [x] Task 8: stk init + stk doctor
-- [ ] Task 9: stk stats
+- [x] Task 9: stk stats
 - [ ] **Phase 1 dogfood checkpoint** (install in this repo, watch `stk stats`)
 - [ ] Task 10: Grep match folding
 - [ ] Task 11: Glob tree folding

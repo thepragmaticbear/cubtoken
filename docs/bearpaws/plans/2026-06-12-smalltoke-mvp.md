@@ -448,7 +448,7 @@ fn init_is_idempotent_and_preserves_existing_settings() {
 - Create: `crates/stk-cli/src/stats.rs`
 - Modify: `crates/stk-cli/src/main.rs`
 
-- [ ] **Step 1: Write failing test** (assert_cmd; seed a `.smalltoke/` with two session JSONL files via `Ledger` API or literal lines):
+- [x] **Step 1: Write failing test** (assert_cmd; seed a `.smalltoke/` with two session JSONL files via `Ledger` API or literal lines):
 
 ```rust
 #[test]
@@ -463,13 +463,13 @@ fn stats_reports_totals_and_percent() {
 }
 ```
 
-- [ ] **Step 2: Run — verify FAIL.**
+- [x] **Step 2: Run — verify FAIL.**
 
-- [ ] **Step 3: Implement:** glob `.smalltoke/session-*.jsonl`, replay `save` records, print a per-tool table (tokens in, tokens out, saved, %) plus a lifetime total row.
+- [x] **Step 3: Implement:** glob `.smalltoke/session-*.jsonl`, replay `save` records, print a per-tool table (tokens in, tokens out, saved, %) plus a lifetime total row.
 
-- [ ] **Step 4: Run — verify PASS.**
+- [x] **Step 4: Run — verify PASS.**
 
-- [ ] **Step 5: Commit** — `git commit -m "stk stats savings report"`
+- [x] **Step 5: Commit** — `git commit -m "stk stats savings report"`
 
 **🏁 Phase 1 complete — dogfood checkpoint:** run `stk init` in this repo, develop the remaining tasks with smalltoke active, and check `stk stats` daily. If skeleton views confuse the agent in practice (failed Edits, repeated re-reads), fix before proceeding.
 
