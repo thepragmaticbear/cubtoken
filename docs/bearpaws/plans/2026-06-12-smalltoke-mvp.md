@@ -481,7 +481,7 @@ fn stats_reports_totals_and_percent() {
 - Create: `crates/stk-compress/src/grep.rs`
 - Modify: `crates/stk-hook/src/lib.rs` (dispatch), `crates/stk-hook/tests/end_to_end.rs`
 
-- [ ] **Step 1: Write failing tests** — unit tests in `grep.rs` against constructed match text, plus end-to-end on `grep_many.json`:
+- [x] **Step 1: Write failing tests** — unit tests in `grep.rs` against constructed match text, plus end-to-end on `grep_many.json`:
 
 ```rust
 #[test]
@@ -506,13 +506,13 @@ fn few_matches_pass_through() {
 }
 ```
 
-- [ ] **Step 2: Run — verify FAIL.**
+- [x] **Step 2: Run — verify FAIL.**
 
-- [ ] **Step 3: Implement** `fold`: parse `path:line:text` rows (and `path` rows for files_with_matches mode — passthrough that mode unless > `glob`-scale, then fold like Task 11); group by path; per file keep first `max` rows + `(+k more in <path> — rerun Grep with path=<path>)`; hash identical `text` across ≥5 files into one row + file count + first 3 paths. Return `None` when nothing folded or result not ≥30% smaller. Dispatch `Grep` in `run_hook` using the same `extract_content`/re-wrap machinery from Task 6.
+- [x] **Step 3: Implement** `fold`: parse `path:line:text` rows (and `path` rows for files_with_matches mode — passthrough that mode unless > `glob`-scale, then fold like Task 11); group by path; per file keep first `max` rows + `(+k more in <path> — rerun Grep with path=<path>)`; hash identical `text` across ≥5 files into one row + file count + first 3 paths. Return `None` when nothing folded or result not ≥30% smaller. Dispatch `Grep` in `run_hook` using the same `extract_content`/re-wrap machinery from Task 6.
 
-- [ ] **Step 4: Run — verify PASS.**
+- [x] **Step 4: Run — verify PASS.**
 
-- [ ] **Step 5: Commit** — `git commit -m "Grep match folding"`
+- [x] **Step 5: Commit** — `git commit -m "Grep match folding"`
 
 ---
 

@@ -52,6 +52,27 @@ fn small_read_passes_through() {
 }
 
 #[test]
+fn grep_with_many_matches_is_folded() {
+    let out = run_hook(&fixture("grep_many"), &Config::default()).expect("should fold");
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let content = v["hookSpecificOutput"]["updatedToolOutput"]["content"]
+        .as_str()
+        .unwrap();
+    assert!(content.contains("more matches in"), "fold note: {content}");
+    assert!(content.contains("rerun Grep with path="), "escape hatch");
+    let original: serde_json::Value = serde_json::from_str(&fixture("grep_many")).unwrap();
+    let orig = original["tool_response"]["content"].as_str().unwrap();
+    assert!(content.len() < orig.len() * 7 / 10);
+}
+
+#[test]
+fn grep_files_mode_passes_through() {
+    let mut v: serde_json::Value = serde_json::from_str(&fixture("grep_many")).unwrap();
+    v["tool_response"]["mode"] = serde_json::json!("files_with_matches");
+    assert!(run_hook(&v.to_string(), &Config::default()).is_none());
+}
+
+#[test]
 fn excluded_path_passes_through() {
     let mut v: serde_json::Value = serde_json::from_str(&fixture("read_large")).unwrap();
     v["tool_input"]["file_path"] = serde_json::json!("/private/tmp/stk-capture/NOTES.md");
