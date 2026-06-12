@@ -15,6 +15,7 @@ pub fn run_hook(stdin: &str, cfg: &Config) -> Option<String> {
 /// Per-tool compressor dispatch. Returns the replacement `tool_response`
 /// value, or `None` to pass through. Compressors are wired in as they land
 /// (Read: Task 6, Grep: Task 10, Glob: Task 11, Bash: Task 12).
+#[allow(clippy::match_single_binding)] // arms land as compressors ship
 fn dispatch(payload: &HookPayload, _cfg: &Config) -> Option<serde_json::Value> {
     match payload.tool_name.as_str() {
         _ => None,

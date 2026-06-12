@@ -43,7 +43,7 @@ fn hook() {
     let result = std::panic::catch_unwind(|| {
         let mut input = String::new();
         std::io::stdin().read_to_string(&mut input).ok()?;
-        let cfg = stk_hook::Config::default();
+        let cfg = stk_hook::Config;
         stk_hook::run_hook(&input, &cfg)
     });
     match result {
@@ -79,7 +79,11 @@ fn record(path: &std::path::Path) {
     if line.is_empty() {
         return;
     }
-    let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) else {
+    let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    else {
         return;
     };
     use std::io::Write as _;
