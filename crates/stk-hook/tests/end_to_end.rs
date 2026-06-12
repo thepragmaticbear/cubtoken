@@ -96,6 +96,34 @@ fn glob_with_few_paths_passes_through() {
 }
 
 #[test]
+fn bash_disabled_by_default() {
+    let mut v: serde_json::Value = serde_json::from_str(&fixture("bash_simple")).unwrap();
+    v["tool_response"]["stdout"] =
+        serde_json::json!("\u{1b}[32mok\u{1b}[0m\n".repeat(200) + "done\n");
+    assert!(run_hook(&v.to_string(), &Config::default()).is_none());
+}
+
+#[test]
+fn bash_enabled_strips_noise_on_success_only() {
+    let cfg = Config::load_from(None, Some("[bash]\nenabled = true"));
+    let mut v: serde_json::Value = serde_json::from_str(&fixture("bash_simple")).unwrap();
+    v["tool_response"]["stdout"] =
+        serde_json::json!("\u{1b}[32mok\u{1b}[0m\n".repeat(200) + "done\n");
+
+    let out = run_hook(&v.to_string(), &cfg).expect("should strip");
+    let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let stdout = parsed["hookSpecificOutput"]["updatedToolOutput"]["stdout"]
+        .as_str()
+        .unwrap();
+    assert!(!stdout.contains('\u{1b}'));
+    assert!(stdout.contains("done"));
+
+    // same payload but failing (stderr non-empty): untouched
+    v["tool_response"]["stderr"] = serde_json::json!("assertion failed: left == right");
+    assert!(run_hook(&v.to_string(), &cfg).is_none());
+}
+
+#[test]
 fn excluded_path_passes_through() {
     let mut v: serde_json::Value = serde_json::from_str(&fixture("read_large")).unwrap();
     v["tool_input"]["file_path"] = serde_json::json!("/private/tmp/stk-capture/NOTES.md");

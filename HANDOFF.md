@@ -33,7 +33,7 @@
 - [x] **Phase 1 dogfood checkpoint** — hook installed in this repo's `.claude/settings.local.json` (local because the command embeds an absolute binary path; consider an `init --local` flag later). Activates on next session start; check `stk stats` then.
 - [x] Task 10: Grep match folding
 - [x] Task 11: Glob tree folding
-- [ ] Task 12: Bash noise strip + rtk detection
+- [x] Task 12: Bash noise strip + rtk detection (failure heuristic = non-empty stderr, since Bash responses carry no exit code)
 - [ ] Task 13: Release hardening (CI, README)
 
 ## Decision log

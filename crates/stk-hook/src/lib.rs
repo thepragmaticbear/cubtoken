@@ -94,6 +94,35 @@ fn dispatch(payload: &HookPayload, cfg: &Config) -> Option<serde_json::Value> {
             updated["numFiles"] = serde_json::Value::from(1);
             Some(updated)
         }
+        "Bash" => {
+            if !cfg.bash.enabled {
+                return None;
+            }
+            // never touch failing/interrupted commands: stderr and exit
+            // context are sacred. The recorded response shape has no exit
+            // code field, so non-empty stderr is the failure heuristic.
+            let stderr = payload.tool_response.get("stderr").and_then(|v| v.as_str());
+            if stderr.map(|s| !s.trim().is_empty()).unwrap_or(true) {
+                return None;
+            }
+            if payload
+                .tool_response
+                .get("interrupted")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+            {
+                return None;
+            }
+            let stdout = payload.tool_response.get("stdout")?.as_str()?;
+            let stripped = stk_compress::bash::strip(stdout)?;
+            if cfg.stats.ledger {
+                use stk_compress::estimate::est_tokens;
+                ledger_for(payload).note_saving("Bash", est_tokens(stdout), est_tokens(&stripped));
+            }
+            let mut updated = payload.tool_response.clone();
+            updated["stdout"] = serde_json::Value::String(stripped);
+            Some(updated)
+        }
         _ => None,
     }
 }
