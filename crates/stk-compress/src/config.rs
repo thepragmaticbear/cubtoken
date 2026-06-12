@@ -32,7 +32,7 @@ pub struct GlobCfg {
     pub max_paths: usize,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct BashCfg {
     pub enabled: bool,
 }
@@ -68,12 +68,6 @@ impl Default for GlobCfg {
             enabled: true,
             max_paths: 50,
         }
-    }
-}
-
-impl Default for BashCfg {
-    fn default() -> Self {
-        Self { enabled: false }
     }
 }
 
