@@ -43,7 +43,7 @@ fn hook() {
     let result = std::panic::catch_unwind(|| {
         let mut input = String::new();
         std::io::stdin().read_to_string(&mut input).ok()?;
-        let cfg = stk_hook::Config;
+        let cfg = stk_hook::Config::default();
         stk_hook::run_hook(&input, &cfg)
     });
     match result {

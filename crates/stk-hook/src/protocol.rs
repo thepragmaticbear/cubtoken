@@ -70,13 +70,13 @@ mod tests {
 
     #[test]
     fn malformed_input_yields_none_decision() {
-        assert!(run_hook("not json", &Config).is_none());
+        assert!(run_hook("not json", &Config::default()).is_none());
     }
 
     #[test]
     fn unknown_tool_passes_through() {
         let payload = r#"{"tool_name":"SomeFutureTool","tool_response":{"x":1}}"#;
-        assert!(run_hook(payload, &Config).is_none());
+        assert!(run_hook(payload, &Config::default()).is_none());
     }
 
     #[test]

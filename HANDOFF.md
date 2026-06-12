@@ -25,7 +25,7 @@
 - [x] Task 2: Payload recorder + real fixtures *(captured autonomously via headless `claude -p`; no manual step needed)*
 - [x] Task 3: Hook protocol types and fail-open runner
 - [x] Task 4: tree-sitter signature skeleton (stk-sitter)
-- [ ] Task 5: Config loading (stk-compress)
+- [x] Task 5: Config loading (stk-compress)
 - [ ] Task 6: Read compressor end-to-end  ← *includes live-session validation decision point*
 - [ ] Task 7: Session ledger (edit protection + savings)
 - [ ] Task 8: stk init + stk doctor
