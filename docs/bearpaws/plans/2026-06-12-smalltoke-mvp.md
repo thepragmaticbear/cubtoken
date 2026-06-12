@@ -190,7 +190,7 @@ pub struct HookSpecificOutput {
 - Modify: `crates/stk-sitter/src/lib.rs`
 - Create: `crates/stk-sitter/tests/skeleton.rs`, `crates/stk-sitter/tests/corpus/sample.rs` (a ~200-line realistic Rust file with structs, impls, doc comments, private fns)
 
-- [ ] **Step 1: Write failing tests** (`insta = "1"` as dev-dep):
+- [x] **Step 1: Write failing tests** (`insta = "1"` as dev-dep):
 
 ```rust
 use stk_sitter::{skeleton, Lang};
@@ -218,9 +218,9 @@ fn unknown_language_returns_none() {
 }
 ```
 
-- [ ] **Step 2: Run — verify FAIL.**
+- [x] **Step 2: Run — verify FAIL.**
 
-- [ ] **Step 3: Implement.** Public API:
+- [x] **Step 3: Implement.** Public API:
 
 ```rust
 pub enum Lang { Rust, TypeScript, Python, Go }
@@ -234,9 +234,9 @@ pub fn skeleton(src: &str, lang: Lang) -> Option<Skeleton>;
 
 Algorithm: parse with tree-sitter; walk top-level + one nesting level of named nodes. For declaration kinds per language (Rust: `function_item`, `struct_item`, `enum_item`, `impl_item`, `trait_item`, `use_declaration`, `mod_item`; TS: `function_declaration`, `class_declaration`, `interface_declaration`, `import_statement`, method definitions; Python: `function_definition`, `class_definition`, `import.*`; Go: `function_declaration`, `method_declaration`, `type_declaration`, `import.*`): render the node's **first line verbatim** with its line number, then `{ … }   [L<start>-L<end>]` if the body spans >2 lines. Keep contiguous doc-comment lines immediately above public items. Imports rendered verbatim; runs of >10 collapsed to first 3 + `… +N more imports [L<a>-L<b>]`. Track every emitted verbatim line in `shown_lines`. Parse failure or zero declarations → return `None` (caller falls back).
 
-- [ ] **Step 4: Run — verify PASS**, review and `cargo insta accept` the snapshot, re-run green.
+- [x] **Step 4: Run — verify PASS**, review and `cargo insta accept` the snapshot, re-run green.
 
-- [ ] **Step 5: Commit** — `git commit -m "tree-sitter signature skeletons for Rust/TS/Python/Go"`
+- [x] **Step 5: Commit** — `git commit -m "tree-sitter signature skeletons for Rust/TS/Python/Go"`
 
 ---
 

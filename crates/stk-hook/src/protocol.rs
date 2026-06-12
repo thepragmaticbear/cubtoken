@@ -55,7 +55,13 @@ mod tests {
 
     #[test]
     fn parses_all_recorded_fixtures() {
-        for f in ["read_large", "read_offset", "grep_many", "glob_many", "bash_simple"] {
+        for f in [
+            "read_large",
+            "read_offset",
+            "grep_many",
+            "glob_many",
+            "bash_simple",
+        ] {
             let p: HookPayload = serde_json::from_str(&fixture(f)).expect(f);
             assert!(!p.tool_name.is_empty(), "{f}");
             assert!(!p.session_id.is_empty(), "{f}");
@@ -64,13 +70,13 @@ mod tests {
 
     #[test]
     fn malformed_input_yields_none_decision() {
-        assert!(run_hook("not json", &Config::default()).is_none());
+        assert!(run_hook("not json", &Config).is_none());
     }
 
     #[test]
     fn unknown_tool_passes_through() {
         let payload = r#"{"tool_name":"SomeFutureTool","tool_response":{"x":1}}"#;
-        assert!(run_hook(payload, &Config::default()).is_none());
+        assert!(run_hook(payload, &Config).is_none());
     }
 
     #[test]
