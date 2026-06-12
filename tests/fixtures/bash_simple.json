@@ -1,0 +1,20 @@
+{
+ "session_id": "fixture-session",
+ "transcript_path": "/tmp/fixture/transcript.jsonl",
+ "cwd": "/private/tmp/stk-capture",
+ "permission_mode": "default",
+ "hook_event_name": "PostToolUse",
+ "tool_name": "Bash",
+ "tool_input": {
+  "command": "ls -la src | head -5"
+ },
+ "tool_response": {
+  "stdout": "total 280\ndrwxr-xr-x@ 33 brandon  wheel   1056 Jun 12 15:58 .\ndrwxr-xr-x@  5 brandon  wheel    160 Jun 12 16:01 ..\n-rw-r--r--@  1 brandon  wheel  17522 Jun 12 15:58 big.rs\n-rw-r--r--@  1 brandon  wheel     35 Jun 12 15:58 helper_1.rs",
+  "stderr": "",
+  "interrupted": false,
+  "isImage": false,
+  "noOutputExpected": false
+ },
+ "tool_use_id": "toolu_0195K6b8PoLrhumXVeRgJEvt",
+ "duration_ms": 60
+}

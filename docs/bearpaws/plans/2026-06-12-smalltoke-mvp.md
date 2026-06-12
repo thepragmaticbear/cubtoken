@@ -85,7 +85,7 @@ The exact `tool_response` JSON shapes for Read/Grep/Glob are not fully documente
 - Modify: `crates/stk-cli/src/main.rs`
 - Create: `tests/fixtures/` (recorded payloads, sanitized)
 
-- [ ] **Step 1: Write failing CLI test** in `crates/stk-cli/tests/record.rs` (add `assert_cmd = "2"`, `tempfile = "3"` as dev-deps):
+- [x] **Step 1: Write failing CLI test** in `crates/stk-cli/tests/record.rs` (add `assert_cmd = "2"`, `tempfile = "3"` as dev-deps):
 
 ```rust
 use assert_cmd::Command;
@@ -103,15 +103,15 @@ fn record_appends_stdin_json_to_file() {
 }
 ```
 
-- [ ] **Step 2: Run — verify FAIL** (`cargo test -p stk-cli`): no `record` subcommand.
+- [x] **Step 2: Run — verify FAIL** (`cargo test -p stk-cli`): no `record` subcommand. ✅ failed as expected.
 
-- [ ] **Step 3: Implement** clap derive in `main.rs`: `enum Cmd { Record { path: PathBuf }, Hook, Init { #[arg(long)] global: bool }, Stats, Doctor }`. `Record` reads all of stdin, appends one line to `path` (create if missing), prints nothing, always exits 0. `Hook`/`Init`/`Stats`/`Doctor` are stubs that exit 0 silently for now.
+- [x] **Step 3: Implement** clap derive in `main.rs`: `enum Cmd { Record { path: PathBuf }, Hook, Init { #[arg(long)] global: bool }, Stats, Doctor }`. `Record` reads all of stdin, appends one line to `path` (create if missing), prints nothing, always exits 0. `Hook`/`Init`/`Stats`/`Doctor` are stubs that exit 0 silently for now.
 
-- [ ] **Step 4: Run — verify PASS.**
+- [x] **Step 4: Run — verify PASS.** ✅ 2 passed.
 
-- [ ] **Step 5: Capture real payloads.** Manually (this step is for the human/agent driving a live Claude Code session): add to this repo's `.claude/settings.json` a PostToolUse hook `{"matcher": "Read|Grep|Glob|Bash", "hooks": [{"type": "command", "command": "cargo run -q -p stk-cli -- record tests/fixtures/raw.jsonl"}]}`; in a Claude Code session run one Read of a large file, one offset/limit Read, one Grep with many matches, one Glob with many results, one Bash command. Split the resulting lines into `tests/fixtures/read_large.json`, `read_offset.json`, `grep_many.json`, `glob_many.json`, `bash_simple.json`. Strip any private absolute-path or content data; keep structure. Remove the temporary hook.
+- [x] **Step 5: Capture real payloads.** *(Done autonomously: headless `claude -p` haiku run in /tmp/stk-capture with the recorder hook pre-installed — no session restart needed. Real `tool_response` schemas now in `tests/fixtures/`. Finding: Bash response has NO exit-code field — only stdout/stderr/interrupted/isImage/noOutputExpected.)* Manually (this step is for the human/agent driving a live Claude Code session): add to this repo's `.claude/settings.json` a PostToolUse hook `{"matcher": "Read|Grep|Glob|Bash", "hooks": [{"type": "command", "command": "cargo run -q -p stk-cli -- record tests/fixtures/raw.jsonl"}]}`; in a Claude Code session run one Read of a large file, one offset/limit Read, one Grep with many matches, one Glob with many results, one Bash command. Split the resulting lines into `tests/fixtures/read_large.json`, `read_offset.json`, `grep_many.json`, `glob_many.json`, `bash_simple.json`. Strip any private absolute-path or content data; keep structure. Remove the temporary hook.
 
-- [ ] **Step 6: Commit** — `git commit -m "Add record subcommand and real hook fixtures"`
+- [x] **Step 6: Commit** — `git commit -m "Add record subcommand and real hook fixtures"`
 
 ---
 
