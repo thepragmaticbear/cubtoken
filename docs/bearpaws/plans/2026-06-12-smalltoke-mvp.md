@@ -600,10 +600,10 @@ fn disabled_by_default() {
 - Create: `README.md`, `.github/workflows/ci.yml`
 - Modify: `Cargo.toml` (profile)
 
-- [ ] **Step 1:** `[profile.release] lto = "thin", strip = true`. CI: `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test` on ubuntu + macos.
-- [ ] **Step 2:** README: what it does (one paragraph), the verified mechanism (PostToolUse `updatedToolOutput`), install (`cargo install`, `stk init`), the four invariants from this plan's header, rtk coexistence note, config reference (spec §5 table).
-- [ ] **Step 3:** Full local gate: `cargo fmt --check && cargo clippy -- -D warnings && cargo test`. Expected: all green.
-- [ ] **Step 4: Commit** — `git commit -m "CI, release profile, README"`
+- [x] **Step 1:** `[profile.release] lto = "thin", strip = true`. CI: `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test` on ubuntu + macos.
+- [x] **Step 2:** README: what it does (one paragraph), the verified mechanism (PostToolUse `updatedToolOutput`), install (`cargo install`, `stk init`), the four invariants from this plan's header, rtk coexistence note, config reference (spec §5 table).
+- [x] **Step 3:** Full local gate: `cargo fmt --check && cargo clippy -- -D warnings && cargo test`. Expected: all green.
+- [x] **Step 4: Commit** — `git commit -m "CI, release profile, README"`
 
 ---
 
