@@ -1,3 +1,6 @@
+mod doctor;
+mod init;
+
 use std::io::Read as _;
 use std::path::PathBuf;
 
@@ -32,8 +35,19 @@ fn main() {
     match cli.cmd {
         Cmd::Record { path } => record(&path),
         Cmd::Hook => hook(),
-        // Stubs: silent success until implemented (hook must never break a session)
-        Cmd::Init { .. } | Cmd::Stats | Cmd::Doctor => {}
+        Cmd::Init { global } => {
+            if let Err(e) = init::run(global) {
+                eprintln!("init failed: {e}");
+                std::process::exit(1);
+            }
+        }
+        Cmd::Doctor => {
+            if !doctor::run() {
+                std::process::exit(1);
+            }
+        }
+        // Stub until Task 9
+        Cmd::Stats => {}
     }
 }
 
