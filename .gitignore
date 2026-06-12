@@ -1,2 +1,3 @@
 target/
 .smalltoke/
+.claude/settings.local.json

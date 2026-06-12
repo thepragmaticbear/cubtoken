@@ -30,7 +30,7 @@
 - [x] Task 7: Session ledger (edit protection + savings; protection is always-on, only savings recording is gated by stats.ledger)
 - [x] Task 8: stk init + stk doctor
 - [x] Task 9: stk stats
-- [ ] **Phase 1 dogfood checkpoint** (install in this repo, watch `stk stats`)
+- [x] **Phase 1 dogfood checkpoint** — hook installed in this repo's `.claude/settings.local.json` (local because the command embeds an absolute binary path; consider an `init --local` flag later). Activates on next session start; check `stk stats` then.
 - [ ] Task 10: Grep match folding
 - [ ] Task 11: Glob tree folding
 - [ ] Task 12: Bash noise strip + rtk detection
