@@ -27,7 +27,7 @@
 - [x] Task 4: tree-sitter signature skeleton (stk-sitter)
 - [x] Task 5: Config loading (stk-compress)
 - [x] Task 6: Read compressor end-to-end — **live-session validation PASSED** (headless probe confirmed the model receives the substituted skeleton)
-- [ ] Task 7: Session ledger (edit protection + savings)
+- [x] Task 7: Session ledger (edit protection + savings; protection is always-on, only savings recording is gated by stats.ledger)
 - [ ] Task 8: stk init + stk doctor
 - [ ] Task 9: stk stats
 - [ ] **Phase 1 dogfood checkpoint** (install in this repo, watch `stk stats`)

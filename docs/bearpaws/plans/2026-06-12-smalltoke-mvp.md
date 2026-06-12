@@ -356,7 +356,7 @@ fn small_read_passes_through() {
 - Create: `crates/stk-hook/src/ledger.rs`
 - Modify: `crates/stk-hook/src/lib.rs`, `crates/stk-cli/src/main.rs` (hook matcher will include Edit/Write)
 
-- [ ] **Step 1: Write failing tests** in `ledger.rs` (tempdir-based):
+- [x] **Step 1: Write failing tests** in `ledger.rs` (tempdir-based):
 
 ```rust
 #[test]
@@ -384,13 +384,13 @@ fn savings_accumulate() {
 }
 ```
 
-- [ ] **Step 2: Run — verify FAIL.**
+- [x] **Step 2: Run — verify FAIL.**
 
-- [ ] **Step 3: Implement.** JSONL file `.smalltoke/session-<session_id>.jsonl`, append-only records `{"e":"edit","path":…}` / `{"e":"save","tool":…,"in":…,"out":…}`; `open` replays the file into memory. Wire into `run_hook`: payloads with `tool_name` `Edit`/`Write`/`NotebookEdit` → `note_edit(file_path)`, return `None`; `compress_read` consults `is_protected` (skip compression) and successful compressions call `note_saving` with `est_tokens` before/after. Ledger I/O errors are swallowed (fail open). Update the future `init` matcher list to `Read|Grep|Glob|Bash|Edit|Write|NotebookEdit`.
+- [x] **Step 3: Implement.** JSONL file `.smalltoke/session-<session_id>.jsonl`, append-only records `{"e":"edit","path":…}` / `{"e":"save","tool":…,"in":…,"out":…}`; `open` replays the file into memory. Wire into `run_hook`: payloads with `tool_name` `Edit`/`Write`/`NotebookEdit` → `note_edit(file_path)`, return `None`; `compress_read` consults `is_protected` (skip compression) and successful compressions call `note_saving` with `est_tokens` before/after. Ledger I/O errors are swallowed (fail open). Update the future `init` matcher list to `Read|Grep|Glob|Bash|Edit|Write|NotebookEdit`.
 
-- [ ] **Step 4: Run — verify PASS.**
+- [x] **Step 4: Run — verify PASS.**
 
-- [ ] **Step 5: Commit** — `git commit -m "Session ledger: edit protection and savings tracking"`
+- [x] **Step 5: Commit** — `git commit -m "Session ledger: edit protection and savings tracking"`
 
 ---
 
