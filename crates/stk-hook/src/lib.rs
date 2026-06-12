@@ -1,7 +1,10 @@
+pub mod ledger;
 pub mod protocol;
 
 pub use protocol::{HookOutput, HookPayload};
 pub use stk_compress::Config;
+
+use ledger::Ledger;
 
 /// Core hook entry point: raw stdin JSON in, optional decision JSON out.
 /// `None` means pass through (emit nothing, keep the original tool output).
@@ -12,14 +15,43 @@ pub fn run_hook(stdin: &str, cfg: &Config) -> Option<String> {
     serde_json::to_string(&HookOutput::updated(updated)).ok()
 }
 
+const EDIT_TOOLS: &[&str] = &["Edit", "Write", "NotebookEdit"];
+
+fn ledger_for(payload: &HookPayload) -> Ledger {
+    let dir = std::path::Path::new(&payload.cwd).join(".smalltoke");
+    Ledger::open(&dir, &payload.session_id)
+}
+
 /// Per-tool compressor dispatch. Returns the replacement `tool_response`
 /// value, or `None` to pass through. (Grep: Task 10, Glob: Task 11,
 /// Bash: Task 12.)
 fn dispatch(payload: &HookPayload, cfg: &Config) -> Option<serde_json::Value> {
+    if EDIT_TOOLS.contains(&payload.tool_name.as_str()) {
+        // edit protection always on: a session-edited file is never compressed
+        if let Some(path) = payload.tool_input.get("file_path").and_then(|v| v.as_str()) {
+            ledger_for(payload).note_edit(path);
+        }
+        return None;
+    }
     match payload.tool_name.as_str() {
         "Read" => {
-            stk_compress::read::compress_read(&payload.tool_input, &payload.tool_response, cfg)
-                .map(|o| o.updated_response)
+            let mut ledger = ledger_for(payload);
+            let path = payload
+                .tool_input
+                .get("file_path")
+                .and_then(|v| v.as_str())?;
+            if ledger.is_protected(path) {
+                return None;
+            }
+            let outcome = stk_compress::read::compress_read(
+                &payload.tool_input,
+                &payload.tool_response,
+                cfg,
+            )?;
+            if cfg.stats.ledger {
+                ledger.note_saving("Read", outcome.tokens_in, outcome.tokens_out);
+            }
+            Some(outcome.updated_response)
         }
         _ => None,
     }
