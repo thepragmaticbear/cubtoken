@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/stk-cli", "crates/stk-hook", "crates/stk-compress", "crates/stk-sitter"]
+members = ["crates/ctk-cli", "crates/ctk-hook", "crates/ctk-compress", "crates/ctk-sitter"]
 
 [workspace.package]
 edition = "2021"

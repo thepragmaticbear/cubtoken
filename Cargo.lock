@@ -173,6 +173,50 @@ dependencies = [
 ]
 
 [[package]]
+name = "ctk-cli"
+version = "0.1.0"
+dependencies = [
+ "assert_cmd",
+ "clap",
+ "ctk-hook",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "ctk-compress"
+version = "0.1.0"
+dependencies = [
+ "ctk-sitter",
+ "globset",
+ "serde",
+ "serde_json",
+ "toml",
+]
+
+[[package]]
+name = "ctk-hook"
+version = "0.1.0"
+dependencies = [
+ "ctk-compress",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "ctk-sitter"
+version = "0.1.0"
+dependencies = [
+ "insta",
+ "tree-sitter",
+ "tree-sitter-go",
+ "tree-sitter-python",
+ "tree-sitter-rust",
+ "tree-sitter-typescript",
+]
+
+[[package]]
 name = "difflib"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -522,50 +566,6 @@ name = "similar"
 version = "2.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbbb5d9659141646ae647b42fe094daf6c6192d1620870b449d9557f748b2daa"
-
-[[package]]
-name = "stk-cli"
-version = "0.1.0"
-dependencies = [
- "assert_cmd",
- "clap",
- "serde_json",
- "stk-hook",
- "tempfile",
-]
-
-[[package]]
-name = "stk-compress"
-version = "0.1.0"
-dependencies = [
- "globset",
- "serde",
- "serde_json",
- "stk-sitter",
- "toml",
-]
-
-[[package]]
-name = "stk-hook"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "stk-compress",
- "tempfile",
-]
-
-[[package]]
-name = "stk-sitter"
-version = "0.1.0"
-dependencies = [
- "insta",
- "tree-sitter",
- "tree-sitter-go",
- "tree-sitter-python",
- "tree-sitter-rust",
- "tree-sitter-typescript",
-]
 
 [[package]]
 name = "streaming-iterator"

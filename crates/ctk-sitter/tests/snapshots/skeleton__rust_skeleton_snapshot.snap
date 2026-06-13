@@ -1,0 +1,51 @@
+---
+source: crates/ctk-sitter/tests/skeleton.rs
+assertion_line: 7
+expression: sk.rendered
+---
+    1  use std::collections::HashMap;
+    2  use std::collections::HashSet;
+    3  use std::fmt;
+       … +9 more imports [L4-L12]
+   14  /// Kind of widget understood by the registry.
+   15  pub enum WidgetKind {
+       … [L16-L19]
+   21  /// A widget tracked by the [`Registry`].
+   22  pub struct Widget {
+       … [L23-L28]
+   30  /// Anything that can be persisted to the backing store.
+   31  pub trait Persist {
+   32      /// Serialize into the store's wire format.
+   33      fn to_wire(&self) -> Vec<u8>;
+   35      /// Best-effort human label for logs.
+   36      fn label(&self) -> Cow<'_, str> {
+       … [L37-L38]
+   41  /// Central widget registry; the main entry point of this module.
+   42  pub struct Registry {
+       … [L43-L46]
+   48  impl Registry {
+   49      /// Create an empty registry.
+   50      pub fn new() -> Self {
+       … [L51-L56]
+   58      /// Insert a widget, replacing any widget with the same id.
+   59      ///
+   60      /// Returns the previous widget if one was replaced.
+   61      pub fn insert(&mut self, mut widget: Widget) -> Option<Widget> {
+       … [L62-L66]
+   68      /// Look up a widget by name.
+   69      pub fn by_name(&self, name: &str) -> Option<&Widget> {
+       … [L70-L72]
+   74      fn evict_oldest(&mut self) -> Option<u64> {
+       … [L75-L83]
+   86  impl Persist for Registry {
+   87      fn to_wire(&self) -> Vec<u8> {
+       … [L88-L95]
+   98  impl fmt::Debug for Widget {
+   99      fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+       … [L100-L104]
+  107  const MAX_WIDGETS: usize = 4096;
+  109  /// Load a registry from a directory of wire files.
+  110  pub fn load_registry(dir: &Path) -> io::Result<Registry> {
+       … [L111-L123]
+  125  fn decode_widget(raw: &[u8]) -> Option<Widget> {
+       … [L126-L138]
