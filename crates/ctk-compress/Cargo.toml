@@ -1,0 +1,12 @@
+[package]
+name = "ctk-compress"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+globset = "0.4"
+ctk-sitter = { path = "../ctk-sitter" }
+toml = "1.1.2"

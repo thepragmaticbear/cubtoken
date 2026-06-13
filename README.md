@@ -1,12 +1,12 @@
-# smalltoke
+# cubtoken
 
-A single Rust binary (`stk`) that compresses Claude Code's **native tool outputs** — `Read`, `Grep`, `Glob`, and optionally `Bash` — before they enter the model's context window. Large file reads become tree-sitter signature skeletons with exact line ranges; noisy grep results fold per file; huge glob listings become directory trees. Typical savings: 50–90% on large outputs, with zero workflow change.
+A single Rust binary (`ctk`) that compresses Claude Code's **native tool outputs** — `Read`, `Grep`, `Glob`, and optionally `Bash` — before they enter the model's context window. Large file reads become tree-sitter signature skeletons with exact line ranges; noisy grep results fold per file; huge glob listings become directory trees. Typical savings: 50–90% on large outputs, with zero workflow change.
 
-Stream compressors like [rtk](https://github.com/rtk-ai/rtk) only see commands run through the `Bash` tool — by rtk's own docs, Claude Code's built-in `Read`/`Grep`/`Glob` bypass it entirely, and those native reads are usually the biggest token sink in a session. smalltoke covers exactly that gap and coexists with rtk (Bash handling is off by default and defers to rtk when detected).
+Stream compressors like [rtk](https://github.com/rtk-ai/rtk) only see commands run through the `Bash` tool — by rtk's own docs, Claude Code's built-in `Read`/`Grep`/`Glob` bypass it entirely, and those native reads are usually the biggest token sink in a session. cubtoken covers exactly that gap and coexists with rtk (Bash handling is off by default and defers to rtk when detected).
 
 ## How it works
 
-smalltoke installs as a **PostToolUse hook**. The tool runs normally (a local file read costs nothing); the hook then replaces the result via `updatedToolOutput` *before it reaches the model* — which is where tokens are actually spent. Verified live: a session reading a 26KB source file received a ~70%-smaller skeleton view.
+cubtoken installs as a **PostToolUse hook**. The tool runs normally (a local file read costs nothing); the hook then replaces the result via `updatedToolOutput` *before it reaches the model* — which is where tokens are actually spent. Verified live: a session reading a 26KB source file received a ~70%-smaller skeleton view.
 
 ```
    42  pub struct Registry {
@@ -20,12 +20,12 @@ smalltoke installs as a **PostToolUse hook**. The tool runs normally (a local fi
 ## Install
 
 ```sh
-cargo install --path crates/stk-cli   # or: cargo build --release
-stk init          # project install (.claude/settings.json) + starter .smalltoke.toml
-stk init --global # or per-user (~/.claude/settings.json)
-stk doctor        # verify
+cargo install --path crates/ctk-cli   # or: cargo build --release
+ctk init          # project install (.claude/settings.json) + starter .cubtoken.toml
+ctk init --global # or per-user (~/.claude/settings.json)
+ctk doctor        # verify
 # restart your Claude Code session (hooks snapshot at startup)
-stk stats         # watch the savings accumulate
+ctk stats         # watch the savings accumulate
 ```
 
 ## Design invariants
@@ -35,7 +35,7 @@ stk stats         # watch the savings accumulate
 3. **Verbatim lines** — every source line shown in a skeleton is the exact file text at the stated line number, so quoted edits stay valid. Targeted `Read(offset/limit)` calls are never compressed, and a file the model has edited this session is never compressed again (Edit-protection ledger).
 4. **Deterministic** — same input, same output. No LLM calls, no network, fully local.
 
-## Configuration (`.smalltoke.toml`, overlaid on `~/.config/smalltoke/config.toml`)
+## Configuration (`.cubtoken.toml`, overlaid on `~/.config/cubtoken/config.toml`)
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -47,10 +47,10 @@ stk stats         # watch the savings accumulate
 | `glob.enabled` | `true` | Fold long Glob listings into a tree |
 | `glob.max_paths` | `50` | Listings at or under this pass through |
 | `bash.enabled` | `false` | Minimal ANSI/progress strip; leave off if you use rtk |
-| `stats.ledger` | `true` | Record savings to `.smalltoke/` for `stk stats` |
+| `stats.ledger` | `true` | Record savings to `.cubtoken/` for `ctk stats` |
 
 Languages with skeleton support: Rust, TypeScript/TSX/JS, Python, Go (tree-sitter). Other files fall back to head+tail elision with line numbers.
 
 ## Development
 
-TDD throughout; fixtures in `tests/fixtures/` are real recorded hook payloads (see `stk record`). Gate: `cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test`. Design docs live in `docs/bearpaws/plans/`.
+TDD throughout; fixtures in `tests/fixtures/` are real recorded hook payloads (see `ctk record`). Gate: `cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test`. Design docs live in `docs/bearpaws/plans/`.
