@@ -74,21 +74,27 @@ fn init_does_not_overwrite_existing_cubtoken_toml() {
 #[test]
 fn doctor_passes_after_init_and_fails_before() {
     let dir = tempfile::tempdir().unwrap();
+    // Hermetic HOME: doctor also checks `$HOME/.claude/settings.json`, so an
+    // empty HOME keeps a real global install from leaking into the "before" check.
+    let home = tempfile::tempdir().unwrap();
     Command::cargo_bin("ctk")
         .unwrap()
         .current_dir(dir.path())
+        .env("HOME", home.path())
         .arg("doctor")
         .assert()
         .failure();
     Command::cargo_bin("ctk")
         .unwrap()
         .current_dir(dir.path())
+        .env("HOME", home.path())
         .arg("init")
         .assert()
         .success();
     let assert = Command::cargo_bin("ctk")
         .unwrap()
         .current_dir(dir.path())
+        .env("HOME", home.path())
         .arg("doctor")
         .assert()
         .success();

@@ -15,6 +15,17 @@ pub fn run_hook(stdin: &str, cfg: &Config) -> Option<String> {
     serde_json::to_string(&HookOutput::updated(updated)).ok()
 }
 
+/// Production entry point: like [`run_hook`] but loads layered config from the
+/// payload's `cwd` (global `~/.config/cubtoken/config.toml`, then that
+/// project's `.cubtoken.toml`) rather than taking a `Config`. Fail-open: a
+/// parse failure or absent config falls back to defaults / pass-through.
+pub fn run_hook_auto(stdin: &str) -> Option<String> {
+    let payload: HookPayload = serde_json::from_str(stdin).ok()?;
+    let cfg = Config::load_for(std::path::Path::new(&payload.cwd));
+    let updated = dispatch(&payload, &cfg)?;
+    serde_json::to_string(&HookOutput::updated(updated)).ok()
+}
+
 const EDIT_TOOLS: &[&str] = &["Edit", "Write", "NotebookEdit"];
 
 fn ledger_for(payload: &HookPayload) -> Ledger {

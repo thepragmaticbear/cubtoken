@@ -57,8 +57,7 @@ fn hook() {
     let result = std::panic::catch_unwind(|| {
         let mut input = String::new();
         std::io::stdin().read_to_string(&mut input).ok()?;
-        let cfg = ctk_hook::Config::default();
-        ctk_hook::run_hook(&input, &cfg)
+        ctk_hook::run_hook_auto(&input)
     });
     match result {
         Ok(Some(json)) => println!("{json}"),
