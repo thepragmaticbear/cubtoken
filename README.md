@@ -54,7 +54,7 @@ cubtoken installs as a **PostToolUse hook**. The tool runs normally (a local fil
 
    Prints a per-tool table (`tokens in / out / saved / saved%`) plus a lifetime `TOTAL`, aggregated across every session ledger in `.cubtoken/`. `no savings recorded yet` means no compressible tool calls have run in a post-`init` session — re-check step 3.
 
-7. **Tune (optional).** Edit `.cubtoken.toml` to compress more or less — raise `read.threshold_tokens`, add globs to `read.never_compress`, or set `bash.enabled = true` if you do not run rtk. See [Configuration](#configuration-cubtokentoml-overlaid-on-configcubtokenconfigtoml) below. Restart the session for changes to take effect.
+7. **Tune (optional).** Edit `.cubtoken.toml` to compress more or less — raise `read.threshold_tokens`, add globs to `read.never_compress`, or set `bash.enabled = true` if you do not run rtk. See [Configuration](#configuration-cubtokentoml-overlaid-on-configcubtokenconfigtoml) below. Config is re-read on every tool call, so edits apply to the next one — no restart needed (only installing the hook with `ctk init` requires a restart).
 
 ## Design invariants
 
@@ -76,6 +76,8 @@ cubtoken installs as a **PostToolUse hook**. The tool runs normally (a local fil
 | `glob.max_paths` | `50` | Listings at or under this pass through |
 | `bash.enabled` | `false` | Minimal ANSI/progress strip; leave off if you use rtk |
 | `stats.ledger` | `true` | Record savings to `.cubtoken/` for `ctk stats` |
+
+Config is layered: built-in defaults, then the global `~/.config/cubtoken/config.toml`, then the project `.cubtoken.toml` in the directory Claude Code is running in (project wins on conflicts). The hook reads these per tool call against the session's working directory, so a single global `ctk init --global` install still honors each project's own `.cubtoken.toml` — drop one in any repo to tune it there.
 
 Languages with skeleton support: Rust, TypeScript/TSX/JS, Python, Go (tree-sitter). Other files fall back to head+tail elision with line numbers.
 

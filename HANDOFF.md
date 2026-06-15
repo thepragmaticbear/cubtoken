@@ -1,9 +1,9 @@
 # cubtoken — Running Handoff Doc
 
 > **Purpose:** If this session dies (rate limit, crash), a fresh session resumes from this file.
-> **Last updated:** 2026-06-13 — renamed project smalltoke→cubtoken (binary stk→ctk). **ALL 13 TASKS COMPLETE.** Plan fully executed; see 'Where to go next'.
+> **Last updated:** 2026-06-15 — fixed a config-loading bug: the hook ran with `Config::default()`, so `.cubtoken.toml` and the global file were inert at runtime. Now loads layered config from the payload `cwd` (see decision log). (2026-06-13: renamed smalltoke→cubtoken, binary stk→ctk. **ALL 13 MVP TASKS COMPLETE.**)
 >
-> **Note:** the on-disk directory is still `~/repos/smalltoke` (rename deferred by choice); only the project/binary/crate names changed. The memory dir is keyed off that path, so it's unaffected.
+> **Note:** work now happens in `~/repos/cubtoken`; a `~/repos/smalltoke` copy still exists on disk. The memory dir is still keyed off the `smalltoke` path, so it's unaffected. **Gotcha:** the `cubtoken` checkout inherited `smalltoke`'s `target/`, which baked the old manifest path into `insta`, so `ctk-sitter`'s `rust_skeleton_snapshot` fails in a full `cargo test` (passes in isolation) with a `/Users/brandon/repos/smalltoke/...` path in the error. Fix: `cargo clean` (or `cargo clean -p ctk-sitter`).
 
 ## How to resume
 
@@ -48,6 +48,7 @@
 | 2026-06-12 | tree-sitter deps deferred from Task 1 to Task 4 | Resolve grammar/core version pins once, when actually implementing skeletons; keeps scaffold build trivially green |
 | 2026-06-12 | Work directly on `main` | Greenfield, solo repo |
 | 2026-06-13 | Renamed smalltoke→cubtoken, binary stk→ctk, crates ctk-* | User rename request; `ctk` keeps the abbreviation coherent (cub-to-ken). Directory left as `smalltoke` to avoid disrupting the live session/memory path. Fixtures' `stk-capture` sample paths left untouched (opaque recorded data). |
+| 2026-06-15 | Hook loads layered config from the payload `cwd` (`run_hook_auto` + `Config::load_for`) | `main.rs` called `Config::default()`, so `.cubtoken.toml` and the global file were ignored at runtime — every documented setting was inert (Task 5 built the loader but nothing called it). Reading from `payload.cwd` (not process cwd) makes a global hook install honor each project's config and matches where the ledger is written. `run_hook(cfg)` kept for test injection. |
 
 ## Blockers / manual steps pending
 
@@ -64,7 +65,8 @@
 
 (keep this section current — what's half-done, surprising findings, anything a fresh session can't infer from git)
 
-- **Environment:** Rust was not installed on this machine; installed via `brew install rustup` + `rustup default stable` (rustc 1.96.0). cargo lives at `~/.cargo/bin` — shells may need `export PATH="$HOME/.cargo/bin:$PATH"`.
+- **Config wiring (2026-06-15):** the CLI hook now calls `ctk_hook::run_hook_auto`, which loads global + `<payload.cwd>/.cubtoken.toml` via `Config::load_for`. Config is read fresh per tool call, so config edits need no session restart (only `ctk init` does, since the hook entry is snapshotted at session start). Regression test: `run_hook_auto_loads_project_config_from_cwd` in `crates/ctk-hook/tests/end_to_end.rs`. Also made `doctor_passes_after_init_and_fails_before` hermetic (it sets `HOME` to a temp dir) so a developer's real global install no longer fails it.
+- **Environment:** Rust was not installed on this machine; installed via Homebrew `rustup` (rustc/cargo 1.96.0). Homebrew links only `rustup` into `/opt/homebrew/bin`; the `cargo`/`rustc` proxies live in `/opt/homebrew/opt/rustup/bin`, and `cargo install` drops binaries in `~/.cargo/bin`. `~/.zshrc` now puts both on PATH: `export PATH="$HOME/.cargo/bin:/opt/homebrew/opt/rustup/bin:$PATH"`.
 - **Real `tool_response` schemas** (from fixtures, the ground truth for `extract_content`):
   - `Read`: `{type:"text", file:{filePath, content, numLines, startLine, totalLines}}`
   - `Grep` (content mode): `{mode, numFiles, filenames, content, numLines}` — content rows are `relpath:line:text`
