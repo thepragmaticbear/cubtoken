@@ -17,16 +17,44 @@ cubtoken installs as a **PostToolUse hook**. The tool runs normally (a local fil
         … [L51-L56]
 ```
 
-## Install
+## Getting started
 
-```sh
-cargo install --path crates/ctk-cli   # or: cargo build --release
-ctk init          # project install (.claude/settings.json) + starter .cubtoken.toml
-ctk init --global # or per-user (~/.claude/settings.json)
-ctk doctor        # verify
-# restart your Claude Code session (hooks snapshot at startup)
-ctk stats         # watch the savings accumulate
-```
+1. **Build the binary.** From the repo root:
+
+   ```sh
+   cargo install --path crates/ctk-cli   # puts `ctk` on your PATH
+   # or, without installing: cargo build --release  →  ./target/release/ctk
+   ```
+
+2. **Install the hook.** Run inside the project you want to compress:
+
+   ```sh
+   ctk init            # writes .claude/settings.json + a starter .cubtoken.toml
+   ```
+
+   The hook matches `Read|Grep|Glob|Bash|Edit|Write|NotebookEdit`. Use `ctk init --global` to install once for every project (`~/.claude/settings.json`); the global install does not write a `.cubtoken.toml`. `init` is idempotent — re-running it just refreshes the hook entry, and an existing `.cubtoken.toml` is never overwritten.
+
+3. **Restart Claude Code.** Hooks are snapshotted at session start, so the hook only takes effect in a session opened *after* `init`.
+
+4. **Verify the install:**
+
+   ```sh
+   ctk doctor
+   ```
+
+   Expect `PASS  PostToolUse hook installed` and `PASS  .cubtoken/ writable`. The `INFO  rtk …` line reports whether rtk is on your PATH — if it is, leave `bash.enabled = false` and let rtk handle Bash. The exit code is non-zero if any check fails.
+
+5. **Work normally.** Nothing changes in how you use Claude Code. When the model runs `Read`, `Grep`, or `Glob` and the output is large, the hook swaps in the compressed view before it reaches the context window. Targeted `Read(offset, limit)` calls and files you have edited this session are left untouched.
+
+6. **Watch the savings:**
+
+   ```sh
+   ctk stats
+   ```
+
+   Prints a per-tool table (`tokens in / out / saved / saved%`) plus a lifetime `TOTAL`, aggregated across every session ledger in `.cubtoken/`. `no savings recorded yet` means no compressible tool calls have run in a post-`init` session — re-check step 3.
+
+7. **Tune (optional).** Edit `.cubtoken.toml` to compress more or less — raise `read.threshold_tokens`, add globs to `read.never_compress`, or set `bash.enabled = true` if you do not run rtk. See [Configuration](#configuration-cubtokentoml-overlaid-on-configcubtokenconfigtoml) below. Restart the session for changes to take effect.
 
 ## Design invariants
 
