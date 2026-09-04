@@ -5,7 +5,9 @@
 //! in an Edit). Elided regions always advertise their `[La-Lb]` range so the
 //! caller can offer a precise escape hatch.
 
-use tree_sitter::{Language, Node, Parser};
+use std::ops::ControlFlow;
+use std::time::{Duration, Instant};
+use tree_sitter::{Language, Node, ParseOptions, Parser};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Lang {
@@ -35,9 +37,22 @@ pub fn lang_for_path(path: &str) -> Option<Lang> {
 }
 
 pub fn skeleton(src: &str, lang: Lang) -> Option<Skeleton> {
+    if src.contains('\0') {
+        return None;
+    }
     let mut parser = Parser::new();
     parser.set_language(&language(lang)).ok()?;
-    let tree = parser.parse(src, None)?;
+    let deadline = Instant::now() + Duration::from_millis(250);
+    let mut progress = |_: &tree_sitter::ParseState| {
+        if Instant::now() >= deadline {
+            ControlFlow::Break(())
+        } else {
+            ControlFlow::Continue(())
+        }
+    };
+    let mut read = |offset: usize, _| &src.as_bytes()[offset..];
+    let options = ParseOptions::new().progress_callback(&mut progress);
+    let tree = parser.parse_with_options(&mut read, None, Some(options))?;
 
     let mut b = Builder {
         lines: src.lines().collect(),
@@ -421,5 +436,15 @@ impl<'a> Builder<'a> {
         self.out
             .push_str(&format!("{GUTTER}  … [L{start}-L{to}]\n"));
         self.open_marker = Some((offset, start));
+    }
+}
+
+#[cfg(test)]
+mod parser_safety_tests {
+    use super::*;
+
+    #[test]
+    fn nul_bytes_fail_open_before_parsing() {
+        assert!(skeleton("fn main() {\0}", Lang::Rust).is_none());
     }
 }

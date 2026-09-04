@@ -56,7 +56,20 @@ impl Ledger {
     /// `dir` is the data directory (e.g. `<project>/.cubtoken`); created on
     /// first write. Existing records for `session_id` are replayed.
     pub fn open(dir: &Path, session_id: &str) -> Self {
-        let file = dir.join(format!("session-{session_id}.jsonl"));
+        // ponytail: Claude currently sends UUID-like IDs. Keep that shape
+        // filename-safe; hash instead if the host ever permits arbitrary IDs.
+        let safe_session_id: String = session_id
+            .chars()
+            .take(128)
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || matches!(c, '-' | '_') {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+        let file = dir.join(format!("session-{safe_session_id}.jsonl"));
         let mut ledger = Ledger {
             file,
             edited: HashSet::new(),
@@ -88,9 +101,10 @@ impl Ledger {
                         duration_ms,
                         ..
                     }) => {
-                        ledger.refetches += 1;
-                        ledger.refetch_tokens += tokens;
-                        ledger.refetch_duration_ms += duration_ms;
+                        ledger.refetches = ledger.refetches.saturating_add(1);
+                        ledger.refetch_tokens = ledger.refetch_tokens.saturating_add(tokens);
+                        ledger.refetch_duration_ms =
+                            ledger.refetch_duration_ms.saturating_add(duration_ms);
                     }
                     Err(_) => {} // skip corrupt lines
                 }
@@ -137,9 +151,9 @@ impl Ledger {
     }
 
     pub fn note_refetch(&mut self, path: &str, tokens: usize, duration_ms: u64) {
-        self.refetches += 1;
-        self.refetch_tokens += tokens;
-        self.refetch_duration_ms += duration_ms;
+        self.refetches = self.refetches.saturating_add(1);
+        self.refetch_tokens = self.refetch_tokens.saturating_add(tokens);
+        self.refetch_duration_ms = self.refetch_duration_ms.saturating_add(duration_ms);
         self.append(&Record::Refetch {
             path: path.to_string(),
             tokens,
@@ -163,8 +177,8 @@ impl Ledger {
     pub fn totals(&self) -> Totals {
         let mut t = Totals::default();
         for (_, tin, tout) in &self.savings {
-            t.tokens_in += tin;
-            t.tokens_out += tout;
+            t.tokens_in = t.tokens_in.saturating_add(*tin);
+            t.tokens_out = t.tokens_out.saturating_add(*tout);
         }
         t
     }
@@ -173,8 +187,8 @@ impl Ledger {
         let mut map: HashMap<String, Totals> = HashMap::new();
         for (tool, tin, tout) in &self.savings {
             let e = map.entry(tool.clone()).or_default();
-            e.tokens_in += tin;
-            e.tokens_out += tout;
+            e.tokens_in = e.tokens_in.saturating_add(*tin);
+            e.tokens_out = e.tokens_out.saturating_add(*tout);
         }
         map
     }
@@ -183,18 +197,35 @@ impl Ledger {
         let Some(parent) = self.file.parent() else {
             return;
         };
-        if std::fs::create_dir_all(parent).is_err() {
-            return;
+        match std::fs::symlink_metadata(parent) {
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => return,
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                if std::fs::create_dir_all(parent).is_err() {
+                    return;
+                }
+            }
+            Err(_) => return,
         }
         // A globally-installed hook drops .cubtoken/ into every project it
         // touches; a self-ignoring directory keeps it out of git status.
         let ignore = parent.join(".gitignore");
-        if !ignore.exists() {
-            let _ = std::fs::write(&ignore, "*\n");
+        if let Ok(mut file) = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&ignore)
+        {
+            let _ = file.write_all(b"*\n");
         }
         let Ok(json) = serde_json::to_string(record) else {
             return;
         };
+        if std::fs::symlink_metadata(&self.file)
+            .map(|metadata| metadata.file_type().is_symlink())
+            .unwrap_or(false)
+        {
+            return;
+        }
         if let Ok(mut f) = std::fs::OpenOptions::new()
             .create(true)
             .append(true)

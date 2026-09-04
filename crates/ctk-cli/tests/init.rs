@@ -3,7 +3,7 @@ use assert_cmd::Command;
 const MATCHER: &str = "Read|Grep|Glob|Bash|Edit|Write|NotebookEdit";
 
 fn settings(dir: &std::path::Path) -> serde_json::Value {
-    serde_json::from_str(&std::fs::read_to_string(dir.join(".claude/settings.json")).unwrap())
+    serde_json::from_str(&std::fs::read_to_string(dir.join(".claude/settings.local.json")).unwrap())
         .unwrap()
 }
 
@@ -31,11 +31,27 @@ fn init_installs_posttooluse_hook() {
 }
 
 #[test]
+fn global_init_honors_claude_config_dir() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = tempfile::tempdir().unwrap();
+    Command::cargo_bin("ctk")
+        .unwrap()
+        .current_dir(dir.path())
+        .env("CLAUDE_CONFIG_DIR", config.path())
+        .args(["init", "--global"])
+        .assert()
+        .success();
+
+    assert!(config.path().join("settings.json").exists());
+    assert!(!dir.path().join(".cubtoken.toml").exists());
+}
+
+#[test]
 fn init_is_idempotent_and_preserves_existing_settings() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join(".claude")).unwrap();
     std::fs::write(
-        dir.path().join(".claude/settings.json"),
+        dir.path().join(".claude/settings.local.json"),
         r#"{"permissions":{"allow":["Bash(ls:*)"]},"hooks":{"PostToolUse":[{"matcher":"Other","hooks":[]}]}}"#,
     )
     .unwrap();
@@ -59,7 +75,7 @@ fn init_does_not_remove_an_unrelated_command_with_a_ctk_suffix() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join(".claude")).unwrap();
     std::fs::write(
-        dir.path().join(".claude/settings.json"),
+        dir.path().join(".claude/settings.local.json"),
         r#"{"hooks":{"PostToolUse":[{"matcher":"Other","hooks":[{"type":"command","command":"/usr/local/bin/protectk hook"}]}]}}"#,
     )
     .unwrap();
@@ -94,6 +110,58 @@ fn init_does_not_overwrite_existing_cubtoken_toml() {
         .success();
     let kept = std::fs::read_to_string(dir.path().join(".cubtoken.toml")).unwrap();
     assert!(kept.contains("99"));
+}
+
+#[test]
+fn init_does_not_overwrite_unreadable_settings() {
+    let dir = tempfile::tempdir().unwrap();
+    let settings = dir.path().join(".claude/settings.local.json");
+    std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    let original = [0xff, 0xfe, 0xfd];
+    std::fs::write(&settings, original).unwrap();
+
+    Command::cargo_bin("ctk")
+        .unwrap()
+        .current_dir(dir.path())
+        .arg("init")
+        .assert()
+        .failure();
+    assert_eq!(std::fs::read(settings).unwrap(), original);
+}
+
+#[cfg(unix)]
+#[test]
+fn init_does_not_follow_a_broken_config_symlink() {
+    use std::os::unix::fs::symlink;
+
+    let dir = tempfile::tempdir().unwrap();
+    symlink("outside.toml", dir.path().join(".cubtoken.toml")).unwrap();
+
+    Command::cargo_bin("ctk")
+        .unwrap()
+        .current_dir(dir.path())
+        .arg("init")
+        .assert()
+        .success();
+    assert!(!dir.path().join("outside.toml").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn init_rejects_a_symlinked_settings_directory() {
+    use std::os::unix::fs::symlink;
+
+    let dir = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    symlink(outside.path(), dir.path().join(".claude")).unwrap();
+
+    Command::cargo_bin("ctk")
+        .unwrap()
+        .current_dir(dir.path())
+        .arg("init")
+        .assert()
+        .failure();
+    assert!(!outside.path().join("settings.json").exists());
 }
 
 #[test]
