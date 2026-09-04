@@ -8,7 +8,11 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "ctk", about = "cubtoken: compress Claude Code tool outputs")]
+#[command(
+    name = "ctk",
+    version,
+    about = "cubtoken: compress Claude Code tool outputs"
+)]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
@@ -20,7 +24,7 @@ enum Cmd {
     Record { path: PathBuf },
     /// PostToolUse hook handler: hook JSON on stdin, decision JSON on stdout
     Hook,
-    /// Install the hook into .claude/settings.json
+    /// Install the hook into local Claude Code settings
     Init {
         #[arg(long)]
         global: bool,

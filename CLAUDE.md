@@ -9,9 +9,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```sh
-cargo build --release                 # binary at target/release/ctk
-cargo install --path crates/ctk-cli   # install ctk onto PATH
-cargo test                            # all tests
+cargo build --locked --release        # binary at target/release/ctk
+cargo install --locked --path crates/ctk-cli # install ctk onto PATH
+cargo test --locked --workspace       # all tests
 cargo test -p ctk-compress            # one crate
 cargo test --test record              # one integration test file (crates/ctk-cli/tests/record.rs)
 cargo test verbatim                   # tests matching a name substring
@@ -21,10 +21,10 @@ cargo insta review                    # review/accept snapshot changes (ctk-sitt
 **Verification gate (must pass before claiming done — mirrors CI):**
 
 ```sh
-cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
+cargo fmt --check && cargo clippy --locked --workspace --all-targets --all-features -- -D warnings && cargo test --locked --workspace --all-features && cargo audit --deny warnings
 ```
 
-CI runs this matrix on ubuntu + macos. `clippy -- -D warnings` means warnings are build failures; keep it clean.
+CI runs this matrix on Ubuntu, macOS, and Windows. `clippy -- -D warnings` means warnings are build failures; keep it clean.
 
 Runtime commands of the binary itself: `ctk init [--global]` (install hook + write starter `.cubtoken.toml`), `ctk doctor` (health check), `ctk stats` (read savings from the ledger), `ctk hook` (the hook handler — stdin JSON → stdout decision JSON), `ctk record <path>` (append stdin to a JSONL file, used to capture real fixtures).
 
@@ -41,7 +41,7 @@ Four-crate workspace, strictly layered (each depends only on the next):
 
 **Ledger** (`<cwd>/.cubtoken/session-<session_id>.jsonl`): append-only JSONL with two record types — `edit` (path protection) and `save` (token savings). Replayed on open. Two jobs: (1) **edit-protection** — a file the model has edited this session is never compressed again (always on, prevents the Edit-correctness hazard); (2) **savings tracking** for `ctk stats` (gated by `stats.ledger`). All ledger I/O is best-effort and degrades silently.
 
-## Invariants (these override convenience — see `docs/bearpaws/plans/2026-06-12-cubtoken-design.md`)
+## Invariants
 
 1. **Fail open** — any error, panic, or unparseable input passes the original output through untouched. Every error path in `run_hook`/`dispatch` returns `None`; the CLI catches panics and exits 0. Never let the hook break a session.
 2. **Escape hatch** — every compressed view names the exact tool call that retrieves the elided content (e.g. `Read(file_path=…, offset=…, limit=…)`, `[La-Lb]` ranges).
@@ -55,10 +55,8 @@ Four-crate workspace, strictly layered (each depends only on the next):
 - **Bash compression is opt-in (`bash.enabled = false`)** to coexist with rtk, which owns Bash. Leave it off unless deliberately enabled.
 - **tree-sitter row gotcha:** a node ending at a newline reports end row = next row, col 0. Comment-adjacency logic in `ctk-sitter` must normalize this.
 - **Hooks snapshot at session start.** After `ctk init` or reinstalling, the user must restart their Claude Code session for changes to take effect.
-- **The on-disk directory is still `~/repos/smalltoke`** (project/binary/crates were renamed smalltoke→cubtoken, stk→ctk, but the dir was intentionally left to preserve the session/memory path). Fixture sample paths still mention `stk-capture` — that's opaque recorded data, leave it.
 
 ## Conventions
 
-- **TDD, plan-driven.** Work follows `docs/bearpaws/plans/2026-06-12-cubtoken-mvp.md` (13 tasks, test-first). Write the failing test, then implement. One commit per task/meaningful step, short imperative messages.
-- `HANDOFF.md` is a running resume-from-here doc; keep its "Current state notes" and decision log current when state changes in non-obvious ways.
+- **TDD.** Write the failing test, then implement. One commit per meaningful step, short imperative messages.
 - Tests live both inline (`#[cfg(test)] mod tests`) and as integration tests under each crate's `tests/`. `ctk-sitter` uses `insta` snapshots.

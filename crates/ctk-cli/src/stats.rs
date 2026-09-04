@@ -19,13 +19,13 @@ pub fn run() {
                 continue;
             };
             let ledger = Ledger::open(std::path::Path::new(".cubtoken"), session);
-            refetches += ledger.refetches();
-            refetch_tokens += ledger.refetch_tokens();
-            refetch_duration_ms += ledger.refetch_duration_ms();
+            refetches = refetches.saturating_add(ledger.refetches());
+            refetch_tokens = refetch_tokens.saturating_add(ledger.refetch_tokens());
+            refetch_duration_ms = refetch_duration_ms.saturating_add(ledger.refetch_duration_ms());
             for (tool, t) in ledger.per_tool() {
                 let e = per_tool.entry(tool).or_default();
-                e.tokens_in += t.tokens_in;
-                e.tokens_out += t.tokens_out;
+                e.tokens_in = e.tokens_in.saturating_add(t.tokens_in);
+                e.tokens_out = e.tokens_out.saturating_add(t.tokens_out);
             }
         }
     }
@@ -42,8 +42,8 @@ pub fn run() {
     let mut grand = Totals::default();
     for (tool, t) in &per_tool {
         print_row(tool, t);
-        grand.tokens_in += t.tokens_in;
-        grand.tokens_out += t.tokens_out;
+        grand.tokens_in = grand.tokens_in.saturating_add(t.tokens_in);
+        grand.tokens_out = grand.tokens_out.saturating_add(t.tokens_out);
     }
     print_row("TOTAL", &grand);
     println!("\ncounts are estimates (~3.5 chars/token), not tokenizer output");
@@ -62,8 +62,8 @@ pub fn run() {
 fn print_row(label: &str, t: &Totals) {
     let saved = t.tokens_in.saturating_sub(t.tokens_out);
     // rounded integer percentage
-    let pct = (saved * 100 + t.tokens_in / 2)
-        .checked_div(t.tokens_in)
+    let pct = (saved as u128 * 100 + t.tokens_in as u128 / 2)
+        .checked_div(t.tokens_in as u128)
         .unwrap_or(0);
     println!(
         "{label:<10} {:>12} {:>12} {saved:>12} {pct:>6}%",

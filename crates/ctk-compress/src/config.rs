@@ -326,6 +326,7 @@ mod tests {
     #[test]
     fn default_excludes_env_files() {
         let c = Config::default();
+        assert!(c.read.is_excluded(".env"));
         assert!(c.read.is_excluded("app/.env.local"));
     }
 }

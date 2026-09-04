@@ -5,7 +5,9 @@
 //! in an Edit). Elided regions always advertise their `[La-Lb]` range so the
 //! caller can offer a precise escape hatch.
 
-use tree_sitter::{Language, Node, Parser};
+use std::ops::ControlFlow;
+use std::time::{Duration, Instant};
+use tree_sitter::{Language, Node, ParseOptions, Parser};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Lang {
@@ -35,9 +37,22 @@ pub fn lang_for_path(path: &str) -> Option<Lang> {
 }
 
 pub fn skeleton(src: &str, lang: Lang) -> Option<Skeleton> {
+    if src.contains('\0') {
+        return None;
+    }
     let mut parser = Parser::new();
     parser.set_language(&language(lang)).ok()?;
-    let tree = parser.parse(src, None)?;
+    let deadline = Instant::now() + Duration::from_millis(250);
+    let mut progress = |_: &tree_sitter::ParseState| {
+        if Instant::now() >= deadline {
+            ControlFlow::Break(())
+        } else {
+            ControlFlow::Continue(())
+        }
+    };
+    let mut read = |offset: usize, _| &src.as_bytes()[offset..];
+    let options = ParseOptions::new().progress_callback(&mut progress);
+    let tree = parser.parse_with_options(&mut read, None, Some(options))?;
 
     let mut b = Builder {
         lines: src.lines().collect(),
@@ -97,8 +112,14 @@ fn decl_kinds(lang: Lang) -> &'static [&'static str] {
             "public_field_definition",
             "lexical_declaration",
             "variable_declaration",
+            "internal_module",
+            "module",
         ],
-        Lang::Python => &["function_definition", "class_definition"],
+        Lang::Python => &[
+            "function_definition",
+            "class_definition",
+            "expression_statement",
+        ],
         Lang::Go => &[
             "function_declaration",
             "method_declaration",
@@ -122,8 +143,30 @@ fn import_kinds(lang: Lang) -> &'static [&'static str] {
 fn container_kinds(lang: Lang) -> &'static [&'static str] {
     match lang {
         Lang::Rust => &["impl_item", "trait_item", "mod_item"],
-        Lang::TypeScript => &["class_declaration", "abstract_class_declaration"],
+        Lang::TypeScript => &[
+            "class_declaration",
+            "abstract_class_declaration",
+            "internal_module",
+            "module",
+        ],
         Lang::Python => &["class_definition"],
+        Lang::Go => &[],
+    }
+}
+
+/// Declarations whose body *is* the signature: a struct's fields, an enum's
+/// variants, an interface's members. Eliding these is negative value — the
+/// shape is exactly what the reader came for, and hiding four field lines to
+/// save four lines just buys a refetch. Rendered verbatim up to
+/// [`MAX_VERBATIM_BODY_LINES`], then elided like any other body.
+fn verbatim_body_kinds(lang: Lang) -> &'static [&'static str] {
+    match lang {
+        Lang::Rust => &["struct_item", "enum_item", "union_item"],
+        Lang::TypeScript => &["interface_declaration", "enum_declaration"],
+        // Python class bodies hold methods too, so they keep recursing;
+        // field assignments are picked up via `decl_kinds`.
+        Lang::Python => &[],
+        // Go type declarations already render whole: no `body` field to elide.
         Lang::Go => &[],
     }
 }
@@ -138,20 +181,78 @@ fn unwrap_decl<'t>(node: Node<'t>) -> Node<'t> {
                 .find(|c| !c.kind().contains("comment") && c.kind() != "decorator");
             inner.unwrap_or(node)
         }
+        // A bare `namespace N {}` arrives wrapped in an `expression_statement`
+        // (only the `export`ed form is an `export_statement`). Unwrap just that
+        // case — Python relies on `expression_statement` staying intact.
+        "expression_statement" => {
+            let mut cursor = node.walk();
+            let mut children = node.named_children(&mut cursor);
+            match children.next() {
+                Some(inner)
+                    if matches!(inner.kind(), "internal_module" | "module")
+                        && children.next().is_none() =>
+                {
+                    inner
+                }
+                _ => node,
+            }
+        }
         _ => node,
     }
 }
 
+/// A value that is *itself* a function, so its body is a body to elide.
+/// A function buried inside an object literal, array or call argument is not:
+/// `const handler = async () => {…}` elides its body, but
+/// `HANDLERS = {"a": lambda x: f(x), …}` is a data shape to show whole.
+fn is_function_like(kind: &str) -> bool {
+    matches!(
+        kind,
+        "arrow_function"
+            | "function"
+            | "function_expression"
+            | "generator_function"
+            | "lambda"
+            | "closure_expression"
+    )
+}
+
+/// The declaration's own body, if it has one.
+///
+/// Follows only the direct value chain (`value`/`right`, through a lone
+/// declarator), never a general descendant search: `body_node` used to find
+/// any nested `body` field, so an assignment holding a lambda or comprehension
+/// reported that inner body as the end of its signature and truncated the
+/// statement mid-expression behind a misleading `[La-Lb]` marker.
 fn body_node<'t>(node: Node<'t>) -> Option<Node<'t>> {
     if let Some(body) = node.child_by_field_name("body") {
         return Some(body);
     }
-    let mut cursor = node.walk();
-    let found = node.named_children(&mut cursor).find_map(body_node);
-    found
+    let next = node
+        .child_by_field_name("value")
+        .or_else(|| node.child_by_field_name("right"))
+        .or_else(|| {
+            // `lexical_declaration` wraps a lone `variable_declarator`
+            let mut cursor = node.walk();
+            let mut named = node.named_children(&mut cursor);
+            match (named.next(), named.next()) {
+                (Some(only), None) => Some(only),
+                _ => None,
+            }
+        })?;
+    if next.child_by_field_name("body").is_some() && !is_function_like(next.kind()) {
+        return None;
+    }
+    body_node(next)
 }
 
 const MAX_IMPORTS_SHOWN: usize = 10;
+/// Nesting levels a container recurses through before collapsing its body.
+/// Covers `mod`/`namespace` wrapping an `impl`/`class` wrapping members.
+const MAX_CONTAINER_DEPTH: usize = 3;
+/// A struct/enum/interface body longer than this is elided like anything else
+/// — a 300-variant enum is not a signature.
+const MAX_VERBATIM_BODY_LINES: usize = 40;
 const GUTTER: &str = "     ";
 
 struct Builder<'a> {
@@ -234,14 +335,26 @@ impl<'a> Builder<'a> {
                     body.start_position().row
                 }
             })
-            .unwrap_or_else(|| decl.end_position().row)
+            // A bodyless decl (a const, a module-level assignment) is its own
+            // signature — but a 300-line lookup table is not. Cap it so the
+            // overflow is elided and advertised like any other body.
+            .unwrap_or_else(|| decl.end_position().row.min(sig + MAX_VERBATIM_BODY_LINES))
             .min(end);
         for row in outer.start_position().row..=signature_end {
             self.emit_verbatim(row);
         }
         self.decls += 1;
 
-        if depth == 0 && container_kinds(self.lang).contains(&decl.kind()) {
+        if end > signature_end
+            && end - signature_end <= MAX_VERBATIM_BODY_LINES
+            && verbatim_body_kinds(self.lang).contains(&decl.kind())
+        {
+            for row in signature_end + 1..=end {
+                self.emit_verbatim(row);
+            }
+            return;
+        }
+        if depth < MAX_CONTAINER_DEPTH && container_kinds(self.lang).contains(&decl.kind()) {
             if let Some(body) = decl.child_by_field_name("body") {
                 self.process_children(body, depth + 1);
                 return;
@@ -323,5 +436,15 @@ impl<'a> Builder<'a> {
         self.out
             .push_str(&format!("{GUTTER}  … [L{start}-L{to}]\n"));
         self.open_marker = Some((offset, start));
+    }
+}
+
+#[cfg(test)]
+mod parser_safety_tests {
+    use super::*;
+
+    #[test]
+    fn nul_bytes_fail_open_before_parsing() {
+        assert!(skeleton("fn main() {\0}", Lang::Rust).is_none());
     }
 }
