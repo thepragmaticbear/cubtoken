@@ -37,6 +37,11 @@ Four-crate workspace, strictly layered (each depends only on the next):
 - **`ctk-compress`** — per-tool compressors (`read.rs`, `grep.rs`, `glob_fold.rs`, `bash.rs`), plus `config.rs` and `estimate.rs` (cheap ~3.5 chars/token estimator).
 - **`ctk-sitter`** — leaf crate: file text → signature skeleton via tree-sitter. Languages: Rust, TypeScript/TSX/JS (one TSX grammar covers ts/tsx/js/jsx/mjs/cjs), Python, Go. Unknown/unparseable files fall back to head+tail elision in `read.rs`.
 
+Two non-Rust install paths sit beside the crates:
+
+- **`plugins/cubtoken/`** — the same PostToolUse hook packaged as a Claude Code plugin (`.claude-plugin/plugin.json` + `hooks/hooks.json` + a `bin/ctk-hook` wrapper that resolves `ctk` at call time). Listed from the repo-root `.claude-plugin/marketplace.json`. The matcher is duplicated in `crates/ctk-cli/tests/plugin.rs` — keep it equal to `init::MATCHER`.
+- **`packages/opencode/`** — `@cubtoken/opencode`, an OpenCode plugin that translates OpenCode's `tool.execute.after` payload into the Claude Code hook shape and shells out to `ctk hook`. Covers `read` plus `edit`/`write` protection only. `cargo test --test opencode` runs its self-check.
+
 **Data flow:** Claude runs a matched tool → PostToolUse fires `ctk hook` → `run_hook` parses stdin → `dispatch` returns either a replacement `tool_response` value (wrapped as `updatedToolOutput`) or `None` (pass through). `dispatch` also intercepts `Edit`/`Write`/`NotebookEdit` to record the edited path in the ledger, then returns `None`.
 
 **Ledger** (`<cwd>/.cubtoken/session-<session_id>.jsonl`): append-only JSONL with two record types — `edit` (path protection) and `save` (token savings). Replayed on open. Two jobs: (1) **edit-protection** — a file the model has edited this session is never compressed again (always on, prevents the Edit-correctness hazard); (2) **savings tracking** for `ctk stats` (gated by `stats.ledger`). All ledger I/O is best-effort and degrades silently.
@@ -44,7 +49,7 @@ Four-crate workspace, strictly layered (each depends only on the next):
 ## Invariants (these override convenience — see `docs/bearpaws/plans/2026-06-12-cubtoken-design.md`)
 
 1. **Fail open** — any error, panic, or unparseable input passes the original output through untouched. Every error path in `run_hook`/`dispatch` returns `None`; the CLI catches panics and exits 0. Never let the hook break a session.
-2. **Escape hatch** — every compressed view names the exact tool call that retrieves the elided content (e.g. `Read(file_path=…, offset=…, limit=…)`, `[La-Lb]` ranges).
+2. **Escape hatch** — every compressed view names the exact tool call that retrieves the elided content (e.g. `Read(file_path=…, offset=…, limit=…)`, `[La-Lb]` ranges). The call differs per host, so `CUBTOKEN_HARNESS` (`read.rs::HarnessNames`) switches the spelling; the adapter sets it, not the user.
 3. **Verbatim lines** — every source line shown in a skeleton is the exact file text at the stated 1-based line number (the model may quote it in an Edit). Targeted `Read(offset/limit)` calls are never compressed.
 4. **Deterministic** — no LLM calls, no network. Same input → same output.
 
