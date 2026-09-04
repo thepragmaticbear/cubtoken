@@ -2,19 +2,23 @@
 //! command-specific compression). Never applied to failing commands —
 //! gating happens in the dispatcher.
 
-/// Strip ANSI codes, flatten carriage-return progress lines, collapse
-/// near-duplicate runs and blank runs. `None` = nothing worth stripping.
+/// Strip ANSI codes, flatten carriage-return progress lines, and collapse
+/// blank runs. `None` = nothing worth stripping.
 pub fn strip(stdout: &str) -> Option<String> {
     let no_ansi = strip_ansi(stdout);
 
     // for each \r-overwritten line, only the final segment is visible
     let visible: String = no_ansi
         .split('\n')
-        .map(|line| line.rsplit('\r').next().unwrap_or(line))
+        .map(|line| {
+            line.rsplit('\r')
+                .find(|segment| !segment.is_empty())
+                .unwrap_or(line)
+        })
         .collect::<Vec<_>>()
         .join("\n");
 
-    let collapsed = collapse_repeats(&visible);
+    let collapsed = collapse_blank_runs(&visible);
 
     if collapsed.chars().count() * 10 > stdout.chars().count() * 7 {
         return None; // not meaningfully smaller
@@ -43,56 +47,16 @@ fn strip_ansi(s: &str) -> String {
     out
 }
 
-/// Lines sharing the same prefix-before-first-digit (progress counters,
-/// download lines) collapse to the last one + a repeat note; blank runs
-/// collapse to one blank line.
-fn collapse_repeats(s: &str) -> String {
-    let mut out: Vec<String> = Vec::new();
-    let mut run_key: Option<String> = None;
-    let mut run_last = String::new();
-    let mut run_len = 0usize;
-
-    let flush =
-        |out: &mut Vec<String>, key: &mut Option<String>, last: &mut String, len: &mut usize| {
-            if *len > 0 {
-                if *len > 2 {
-                    out.push(format!("{last}  (repeated x{len})"));
-                } else {
-                    out.push(last.clone());
-                }
-            }
-            *key = None;
-            *len = 0;
-            last.clear();
-        };
-
+fn collapse_blank_runs(s: &str) -> String {
+    let mut out = Vec::new();
+    let mut previous_blank = false;
     for line in s.lines() {
-        if line.trim().is_empty() {
-            flush(&mut out, &mut run_key, &mut run_last, &mut run_len);
-            if out.last().map(|l| !l.is_empty()).unwrap_or(false) {
-                out.push(String::new());
-            }
-            continue;
+        let blank = line.trim().is_empty();
+        if !blank || !previous_blank {
+            out.push(line);
         }
-        let key: String = line
-            .split(|c: char| c.is_ascii_digit())
-            .next()
-            .unwrap_or(line)
-            .to_string();
-        match &run_key {
-            Some(k) if *k == key && !key.trim().is_empty() => {
-                run_last = line.to_string();
-                run_len += 1;
-            }
-            _ => {
-                flush(&mut out, &mut run_key, &mut run_last, &mut run_len);
-                run_key = Some(key);
-                run_last = line.to_string();
-                run_len = 1;
-            }
-        }
+        previous_blank = blank;
     }
-    flush(&mut out, &mut run_key, &mut run_last, &mut run_len);
     let mut joined = out.join("\n");
     joined.push('\n');
     joined
@@ -117,16 +81,24 @@ mod tests {
     }
 
     #[test]
-    fn repeated_counter_lines_collapse() {
-        let noisy: String = (1..=50)
-            .map(|i| format!("Compiling crate {i} of 50\n"))
-            .collect();
-        let out = strip(&noisy).unwrap();
-        assert!(out.contains("(repeated x50)"), "{out}");
-        assert!(
-            out.contains("Compiling crate 50 of 50"),
-            "keeps last: {out}"
+    fn distinct_numbered_lines_are_never_folded() {
+        let output = (1..=50)
+            .map(|i| format!("test {i} passed: case_{i}\n"))
+            .collect::<String>();
+        assert!(strip(&output).is_none(), "clean output must pass through");
+    }
+
+    #[test]
+    fn carriage_return_progress_keeps_final_visible_state() {
+        let noisy = format!(
+            "{}\ndone\n",
+            (0..100)
+                .map(|i| format!("Downloading {i}%\r"))
+                .collect::<String>()
         );
+        let out = strip(&noisy).unwrap();
+        assert!(out.contains("Downloading 99%"), "{out}");
+        assert!(out.contains("done"), "{out}");
     }
 
     #[test]

@@ -6,6 +6,8 @@ use ctk_hook::ledger::{Ledger, Totals};
 pub fn run() {
     let mut per_tool: std::collections::BTreeMap<String, Totals> = Default::default();
     let mut refetches = 0usize;
+    let mut refetch_tokens = 0usize;
+    let mut refetch_duration_ms = 0u64;
 
     if let Ok(entries) = std::fs::read_dir(".cubtoken") {
         for entry in entries.flatten() {
@@ -18,6 +20,8 @@ pub fn run() {
             };
             let ledger = Ledger::open(std::path::Path::new(".cubtoken"), session);
             refetches += ledger.refetches();
+            refetch_tokens += ledger.refetch_tokens();
+            refetch_duration_ms += ledger.refetch_duration_ms();
             for (tool, t) in ledger.per_tool() {
                 let e = per_tool.entry(tool).or_default();
                 e.tokens_in += t.tokens_in;
@@ -47,10 +51,12 @@ pub fn run() {
     // The cost side: every targeted Read back into a file we compressed is a
     // round trip the model would not have needed on the full text.
     println!(
-        "follow-up Read(offset/limit) calls into compressed files: {refetches}\n\
-         a high count means skeletons are eliding what the model needs \
-         — raise read.threshold_tokens"
+        "follow-up Read(offset/limit) calls into compressed files: {refetches} \
+         (~{refetch_tokens} tokens, {refetch_duration_ms}ms tool time)"
     );
+    let gross_saved = grand.tokens_in.saturating_sub(grand.tokens_out);
+    let net_saved = gross_saved.saturating_sub(refetch_tokens);
+    println!("estimated net saved after refetch output: {net_saved} tokens");
 }
 
 fn print_row(label: &str, t: &Totals) {

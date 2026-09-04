@@ -13,6 +13,8 @@ pub struct HookPayload {
     pub session_id: String,
     #[serde(default)]
     pub cwd: String,
+    #[serde(default)]
+    pub duration_ms: Option<u64>,
 }
 
 #[derive(Debug, serde::Serialize)]

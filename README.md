@@ -1,6 +1,8 @@
 # cubtoken
 
-A single Rust binary (`ctk`) that compresses Claude Code's **native tool outputs** — `Read`, `Grep`, `Glob`, and optionally `Bash` — before they enter the model's context window. Large file reads become tree-sitter signature skeletons with exact line ranges; noisy grep results fold per file; huge glob listings become directory trees. Typical savings: 50–90% on large outputs, with zero workflow change.
+A single Rust binary (`ctk`) that compresses Claude Code's **native tool outputs** — `Read`, `Grep`, `Glob`, and optionally `Bash` — before they enter the model's context window. Large file reads become tree-sitter signature skeletons with exact line ranges; noisy grep results fold per file; huge glob listings become directory trees. Zero workflow change.
+
+**Where the evidence actually is:** large `Read` compression is the proven case — 76–88% estimated savings on the reads that trigger it. `Grep`, `Glob` and `Bash` folding are implemented and tested but fired rarely in dogfooding, so treat their value as unproven rather than typical. `ctk stats` reports what your own sessions did.
 
 Stream compressors like [rtk](https://github.com/rtk-ai/rtk) only see commands run through the `Bash` tool — by rtk's own docs, Claude Code's built-in `Read`/`Grep`/`Glob` bypass it entirely, and those native reads are usually the biggest token sink in a session. cubtoken covers exactly that gap and coexists with rtk (Bash handling is off by default and defers to rtk when detected).
 
@@ -19,12 +21,15 @@ cubtoken installs as a **PostToolUse hook**. The tool runs normally (a local fil
 
 ## Getting started
 
-1. **Build the binary.** From the repo root:
+0. **Requirements.** Claude Code with exec-form hooks (`command` + `args`) and `PostToolUse.updatedToolOutput`. Verified against Claude Code **2.1.258**; if `ctk doctor` passes but nothing ever compresses, update Claude Code first.
+
+1. **Get the binary.** Download a prebuilt archive from [Releases](https://github.com/brandonfla/cubtoken/releases) (each release ships `SHA256SUMS` and a build attestation, verifiable with `gh attestation verify`), or build from source:
 
    ```sh
    cargo install --path crates/ctk-cli   # puts `ctk` on your PATH
-   # or, without installing: cargo build --release  →  ./target/release/ctk
    ```
+
+   Install it somewhere permanent. `init` embeds the absolute path of whichever binary you ran it with, so installing the hook straight out of `./target/release` breaks the moment you `cargo clean` — `init` warns when it sees a `target/` path.
 
 2. **Install the hook.** Run inside the project you want to compress:
 
@@ -52,9 +57,9 @@ cubtoken installs as a **PostToolUse hook**. The tool runs normally (a local fil
    ctk stats
    ```
 
-   Prints a per-tool table (`tokens in / out / saved / saved%`) plus a lifetime `TOTAL`, aggregated across every session ledger in `.cubtoken/`. `no savings recorded yet` means no compressible tool calls have run in a post-`init` session — re-check step 3.
+   Prints a per-tool table (`tokens in / out / saved / saved%`) plus a lifetime `TOTAL`, aggregated across every session ledger in `.cubtoken/` (which self-ignores via its own `.gitignore`, so it never shows up in `git status`). `no savings recorded yet` means no compressible tool calls have run in a post-`init` session — re-check step 3.
 
-   Counts are estimates (~3.5 chars/token), not tokenizer output. The last line reports **follow-up `Read(offset/limit)` calls into compressed files** — the cost side of compression, where the model pays a round trip to buy back what a skeleton elided. Savings are only real net of that number; if it climbs, raise `read.threshold_tokens` so fewer files get skeletonized.
+   Counts are estimates (~3.5 chars/token), not tokenizer output. The cost side is reported too: **follow-up `Read(offset/limit)` calls into compressed files** — their count, their estimated tokens, and their tool time — followed by an **estimated net saved** line (gross savings minus refetched tokens). That net number is the one to trust; if it stalls, raise `read.threshold_tokens` so fewer files get skeletonized.
 
 7. **Tune (optional).** Edit `.cubtoken.toml` to compress more or less — raise `read.threshold_tokens`, add globs to `read.never_compress`, or set `bash.enabled = true` if you do not run rtk. See [Configuration](#configuration-cubtokentoml-overlaid-on-configcubtokenconfigtoml) below. Config is re-read on every tool call, so edits apply to the next one — no restart needed (only installing the hook with `ctk init` requires a restart).
 
@@ -75,6 +80,7 @@ cubtoken installs as a **PostToolUse hook**. The tool runs normally (a local fil
 | `read.never_compress` | `["**/*.md", "**/.env*"]` | Glob patterns never compressed |
 | `grep.enabled` | `true` | Fold content-mode Grep results |
 | `grep.max_matches_per_file` | `5` | Per-file match cap before folding |
+| `grep.max_total_matches` | `100` | Global match cap before a per-file summary |
 | `glob.enabled` | `true` | Fold long Glob listings into a tree |
 | `glob.max_paths` | `50` | Listings at or under this pass through |
 | `bash.enabled` | `false` | Minimal ANSI/progress strip; leave off if you use rtk |

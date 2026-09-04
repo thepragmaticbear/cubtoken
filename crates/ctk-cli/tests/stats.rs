@@ -13,7 +13,7 @@ fn stats_reports_totals_and_percent() {
     .unwrap();
     std::fs::write(
         data.join("session-b.jsonl"),
-        "{\"e\":\"save\",\"tool\":\"Read\",\"in\":4000,\"out\":900}\n{\"e\":\"edit\",\"path\":\"/x.rs\"}\n",
+        "{\"e\":\"save\",\"tool\":\"Read\",\"in\":4000,\"out\":900}\n{\"e\":\"edit\",\"path\":\"/x.rs\"}\n{\"e\":\"refetch\",\"path\":\"/x.rs\",\"tokens\":600,\"duration_ms\":12}\n",
     )
     .unwrap();
 
@@ -28,6 +28,8 @@ fn stats_reports_totals_and_percent() {
     assert!(out.contains("14000"), "tokens in: {out}");
     assert!(out.contains("2400"), "tokens out: {out}");
     assert!(out.contains("83%"), "savings percent: {out}");
+    assert!(out.contains("11000 tokens"), "net savings: {out}");
+    assert!(out.contains("600 tokens, 12ms"), "refetch costs: {out}");
 }
 
 #[test]

@@ -72,6 +72,10 @@ fn extract_content(tool_response: &Value) -> Option<&str> {
     tool_response.as_str()
 }
 
+pub fn response_tokens(tool_response: &Value) -> usize {
+    extract_content(tool_response).map(est_tokens).unwrap_or(0)
+}
+
 fn rebuild_response(tool_response: &Value, compressed: &str) -> Value {
     let mut updated = tool_response.clone();
     if updated.pointer("/file/content").is_some() {

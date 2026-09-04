@@ -1,8 +1,10 @@
 [package]
 name = "ctk-cli"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+description = "CLI and Claude Code hook installer for cubtoken"
 
 [[bin]]
 name = "ctk"
@@ -11,7 +13,7 @@ path = "src/main.rs"
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 serde_json.workspace = true
-ctk-hook = { path = "../ctk-hook" }
+ctk-hook = { version = "0.1.0", path = "../ctk-hook" }
 
 [dev-dependencies]
 assert_cmd = "2"

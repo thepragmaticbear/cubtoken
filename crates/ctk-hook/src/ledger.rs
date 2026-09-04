@@ -21,6 +21,8 @@ pub struct Ledger {
     compressed: HashSet<String>,
     savings: Vec<(String, usize, usize)>,
     refetches: usize,
+    refetch_tokens: usize,
+    refetch_duration_ms: u64,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -41,7 +43,13 @@ enum Record {
     /// session: the model buying back what we elided. The cost side of the
     /// savings number.
     #[serde(rename = "refetch")]
-    Refetch { path: String },
+    Refetch {
+        path: String,
+        #[serde(default)]
+        tokens: usize,
+        #[serde(default)]
+        duration_ms: u64,
+    },
 }
 
 impl Ledger {
@@ -55,6 +63,8 @@ impl Ledger {
             compressed: HashSet::new(),
             savings: Vec::new(),
             refetches: 0,
+            refetch_tokens: 0,
+            refetch_duration_ms: 0,
         };
         if let Ok(content) = std::fs::read_to_string(&ledger.file) {
             for line in content.lines() {
@@ -73,7 +83,15 @@ impl Ledger {
                             ledger.compressed.insert(p);
                         }
                     }
-                    Ok(Record::Refetch { .. }) => ledger.refetches += 1,
+                    Ok(Record::Refetch {
+                        tokens,
+                        duration_ms,
+                        ..
+                    }) => {
+                        ledger.refetches += 1;
+                        ledger.refetch_tokens += tokens;
+                        ledger.refetch_duration_ms += duration_ms;
+                    }
                     Err(_) => {} // skip corrupt lines
                 }
             }
@@ -118,16 +136,28 @@ impl Ledger {
         self.compressed.contains(path)
     }
 
-    pub fn note_refetch(&mut self, path: &str) {
+    pub fn note_refetch(&mut self, path: &str, tokens: usize, duration_ms: u64) {
         self.refetches += 1;
+        self.refetch_tokens += tokens;
+        self.refetch_duration_ms += duration_ms;
         self.append(&Record::Refetch {
             path: path.to_string(),
+            tokens,
+            duration_ms,
         });
     }
 
     /// Targeted Reads back into files this session compressed.
     pub fn refetches(&self) -> usize {
         self.refetches
+    }
+
+    pub fn refetch_tokens(&self) -> usize {
+        self.refetch_tokens
+    }
+
+    pub fn refetch_duration_ms(&self) -> u64 {
+        self.refetch_duration_ms
     }
 
     pub fn totals(&self) -> Totals {
@@ -155,6 +185,12 @@ impl Ledger {
         };
         if std::fs::create_dir_all(parent).is_err() {
             return;
+        }
+        // A globally-installed hook drops .cubtoken/ into every project it
+        // touches; a self-ignoring directory keeps it out of git status.
+        let ignore = parent.join(".gitignore");
+        if !ignore.exists() {
+            let _ = std::fs::write(&ignore, "*\n");
         }
         let Ok(json) = serde_json::to_string(record) else {
             return;

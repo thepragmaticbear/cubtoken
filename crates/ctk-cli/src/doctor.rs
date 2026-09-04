@@ -12,19 +12,29 @@ pub fn run() -> bool {
         "PostToolUse hook installed (project, local, or global settings)",
         !found.is_empty(),
     );
-    for (settings, command) in &found {
-        println!("      {} → {command}", settings.display());
+    for hook in &found {
+        println!("      {} → {}", hook.settings.display(), hook.command);
     }
 
     // An `init` embeds an absolute path to the binary. Move or `cargo clean`
     // that binary and every hook invocation silently fails from then on, so
     // check the path still resolves rather than trusting the settings entry.
-    for (settings, command) in &found {
-        let bin = hook_binary(command);
+    for hook in &found {
+        let bin = hook_binary(&hook.command, hook.exec_form);
         ok &= report(
-            &format!("hook binary exists ({})", settings.display()),
-            bin.as_ref().map(|p| p.is_file()).unwrap_or(false),
+            &format!("hook binary is executable ({})", hook.settings.display()),
+            bin.as_ref().map(|p| is_executable(p)).unwrap_or(false),
         );
+    }
+
+    ok &= report("hook core self-test", hook_self_test());
+
+    match ctk_hook::Config::try_load_for(std::path::Path::new(".")) {
+        Ok(_) => ok &= report("configuration parses", true),
+        Err(error) => {
+            ok &= report("configuration parses", false);
+            println!("      {error}");
+        }
     }
 
     ok &= report(
@@ -61,7 +71,13 @@ fn settings_files() -> Vec<PathBuf> {
     paths
 }
 
-fn installed_hooks() -> Vec<(PathBuf, String)> {
+struct InstalledHook {
+    settings: PathBuf,
+    command: String,
+    exec_form: bool,
+}
+
+fn installed_hooks() -> Vec<InstalledHook> {
     let mut found = Vec::new();
     for path in settings_files() {
         let Ok(content) = std::fs::read_to_string(&path) else {
@@ -77,10 +93,20 @@ fn installed_hooks() -> Vec<(PathBuf, String)> {
             continue;
         };
         for entry in entries {
+            if !init::is_ctk_hook_entry(entry) {
+                continue;
+            }
             if let Some(cmd) = entry.pointer("/hooks/0/command").and_then(|c| c.as_str()) {
-                if init::is_ctk_hook_command(cmd) {
-                    found.push((path.clone(), cmd.to_string()));
-                }
+                let exec_form = entry.pointer("/hooks/0/args").is_some();
+                found.push(InstalledHook {
+                    settings: path.clone(),
+                    command: if exec_form {
+                        format!("{cmd} hook")
+                    } else {
+                        cmd.to_string()
+                    },
+                    exec_form,
+                });
             }
         }
     }
@@ -88,13 +114,18 @@ fn installed_hooks() -> Vec<(PathBuf, String)> {
 }
 
 /// `"/abs/path/ctk" hook` or `/abs/path/ctk hook` → the binary path.
-fn hook_binary(command: &str) -> Option<PathBuf> {
-    let bin = command.trim_end().strip_suffix("hook")?.trim_end();
+fn hook_binary(command: &str, exec_form: bool) -> Option<PathBuf> {
+    let bin = if exec_form {
+        command.trim_end().strip_suffix(" hook")?
+    } else {
+        command.trim_end().strip_suffix("hook")?.trim_end()
+    };
     let bin = bin.trim_matches(['"', '\'']);
     if bin.is_empty() {
         return None;
     }
-    if bin.contains('/') {
+    let candidate = PathBuf::from(bin);
+    if candidate.is_absolute() || candidate.components().count() > 1 {
         return Some(PathBuf::from(bin));
     }
     // bare `ctk`: resolve through PATH
@@ -103,6 +134,57 @@ fn hook_binary(command: &str) -> Option<PathBuf> {
             .map(|d| d.join(bin))
             .find(|p| p.is_file())
     })
+}
+
+fn is_executable(path: &std::path::Path) -> bool {
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return false;
+    };
+    if !metadata.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        metadata.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
+}
+
+fn hook_self_test() -> bool {
+    // Fat bodies, one signature each: the shape a real compression has. A
+    // file of one-line functions is mostly signature and would (correctly)
+    // fail the worth-it gate, which would make this check useless.
+    let mut content = String::new();
+    for i in 0..40 {
+        content.push_str(&format!("pub fn sample_{i}(input: &str) -> usize {{\n"));
+        for j in 0..20 {
+            content.push_str(&format!("    let step_{j} = input.len() + {j};\n"));
+        }
+        content.push_str("    input.len()\n}\n\n");
+    }
+    let lines = content.lines().count();
+    let payload = serde_json::json!({
+        "tool_name": "Read",
+        "session_id": "doctor-self-test",
+        "cwd": ".",
+        "tool_input": {"file_path": "/tmp/cubtoken-doctor.rs"},
+        "tool_response": {"type": "text", "file": {
+            "filePath": "/tmp/cubtoken-doctor.rs",
+            "content": content,
+            "numLines": lines,
+            "startLine": 1,
+            "totalLines": lines
+        }}
+    });
+    let cfg = ctk_hook::Config::load_from(
+        None,
+        Some("[read]\nthreshold_tokens = 10\nnever_compress = []\n[stats]\nledger = false"),
+    );
+    ctk_hook::run_hook(&payload.to_string(), &cfg).is_some()
 }
 
 fn report(what: &str, pass: bool) -> bool {
