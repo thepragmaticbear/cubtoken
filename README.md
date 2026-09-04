@@ -39,6 +39,15 @@ cubtoken installs as a **PostToolUse hook**. The tool runs normally (a local fil
 
    The hook matches `Read|Grep|Glob|Bash|Edit|Write|NotebookEdit`. Use `ctk init --global` to install once for every project (`~/.claude/settings.json`); the global install does not write a `.cubtoken.toml`. `init` is idempotent — re-running it just refreshes the hook entry, and an existing `.cubtoken.toml` is never overwritten.
 
+   **Or install the plugin instead.** `plugins/cubtoken/` ships the same hook as a Claude Code plugin, which resolves `ctk` at call time rather than baking in an absolute path — so `cargo clean` or moving the binary can't silently break it:
+
+   ```sh
+   /plugin marketplace add brandonfla/cubtoken
+   /plugin install cubtoken@cubtoken
+   ```
+
+   The plugin doesn't write a starter `.cubtoken.toml`; defaults apply until you add one.
+
 3. **Restart Claude Code.** Hooks are snapshotted at session start, so the hook only takes effect in a session opened *after* `init`.
 
 4. **Verify the install:**
@@ -58,6 +67,21 @@ cubtoken installs as a **PostToolUse hook**. The tool runs normally (a local fil
    ```
 
    Prints a per-tool table (`tokens in / out / saved / saved%`) plus a lifetime `TOTAL`, aggregated across every session ledger in `.cubtoken/` (which self-ignores via its own `.gitignore`, so it never shows up in `git status`). `no savings recorded yet` means no compressible tool calls have run in a post-`init` session — re-check step 3.
+
+## OpenCode
+
+[`@cubtoken/opencode`](packages/opencode) runs the same compressor in OpenCode, whose `tool.execute.after` plugin hook can replace a tool result the same way `updatedToolOutput` does in Claude Code. Install `ctk`, then:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["@cubtoken/opencode"]
+}
+```
+
+Currently wired up: `read` compression and `edit`/`write` protection. `grep`/`glob`/`bash` pass through — that's where the evidence is, not a limitation of the hook.
+
+Codex CLI and Antigravity can't host cubtoken today: neither one's post-tool hook can replace a tool result (Codex offers `systemMessage`/`continue`/`stopReason` only; Antigravity's `PostToolUse` isn't even told which tool ran).
 
    Counts are estimates (~3.5 chars/token), not tokenizer output. The cost side is reported too: **follow-up `Read(offset/limit)` calls into compressed files** — their count, their estimated tokens, and their tool time — followed by an **estimated net saved** line (gross savings minus refetched tokens). That net number is the one to trust; if it stalls, raise `read.threshold_tokens` so fewer files get skeletonized.
 

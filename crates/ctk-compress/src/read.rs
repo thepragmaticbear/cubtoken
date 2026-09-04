@@ -14,6 +14,31 @@ pub struct ReadOutcome {
     pub tokens_out: usize,
 }
 
+/// What the host calls its file-reading tool. Invariant 2 says a compressed
+/// view must name the exact call that retrieves the elided lines, so the names
+/// have to follow the harness rather than being hardcoded to Claude Code's.
+/// Set by the adapter that spawns `ctk`, not by the user, so it is an env var
+/// rather than a config key.
+pub struct HarnessNames {
+    pub read_tool: &'static str,
+    pub path_arg: &'static str,
+}
+
+impl HarnessNames {
+    pub fn from_env() -> Self {
+        match std::env::var("CUBTOKEN_HARNESS").as_deref() {
+            Ok("opencode") => Self {
+                read_tool: "read",
+                path_arg: "filePath",
+            },
+            _ => Self {
+                read_tool: "Read",
+                path_arg: "file_path",
+            },
+        }
+    }
+}
+
 pub fn compress_read(
     tool_input: &Value,
     tool_response: &Value,
@@ -36,14 +61,16 @@ pub fn compress_read(
     }
 
     let view = skeleton_view(content, file_path).unwrap_or_else(|| head_tail_view(content));
+    let names = HarnessNames::from_env();
+    let (tool, path_arg) = (names.read_tool, names.path_arg);
     let compressed = format!(
         "[cubtoken: compressed view of {file_path} — {} chars → skeleton. \
-         This is NOT the full file. The Read tool adds its own sequential \
+         This is NOT the full file. The {tool} tool adds its own sequential \
          numbering down the left edge of this block; ignore it. The real file \
          line numbers are the ones in this view, and bracketed [La-Lb] ranges \
-         mark elided lines — to see any of them run Read(file_path={file_path}, \
+         mark elided lines — to see any of them run {tool}({path_arg}={file_path}, \
          offset=<first line>, limit=<line count>). Before quoting or editing \
-         this file, Read the exact target region first.]\n\n{view}",
+         this file, {tool} the exact target region first.]\n\n{view}",
         content.chars().count()
     );
 
