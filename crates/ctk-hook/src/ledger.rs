@@ -1,8 +1,8 @@
 //! Session-scoped JSONL ledger: which files the model has edited (never
-//! compress those again this session — the Edit-correctness hazard) and the
-//! token savings record behind `ctk stats`. All I/O is best-effort; failures
-//! degrade to "no protection recorded, no savings recorded", never to a
-//! broken hook.
+//! compress those again this session — the Edit-correctness hazard), which
+//! files we compressed, and the token record behind `ctk stats`. All I/O is
+//! best-effort; failures degrade to "no protection recorded, no savings
+//! recorded", never to a broken hook.
 
 use std::collections::{HashMap, HashSet};
 use std::io::Write as _;
@@ -17,7 +17,10 @@ pub struct Totals {
 pub struct Ledger {
     file: PathBuf,
     edited: HashSet<String>,
+    /// Files compressed this session — the population a refetch can come from.
+    compressed: HashSet<String>,
     savings: Vec<(String, usize, usize)>,
+    refetches: usize,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -30,7 +33,15 @@ enum Record {
         tool: String,
         r#in: usize,
         out: usize,
+        /// Present for Read; absent in ledgers written before refetch tracking.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        path: Option<String>,
     },
+    /// A targeted `Read(offset/limit)` into a file we compressed earlier this
+    /// session: the model buying back what we elided. The cost side of the
+    /// savings number.
+    #[serde(rename = "refetch")]
+    Refetch { path: String },
 }
 
 impl Ledger {
@@ -41,7 +52,9 @@ impl Ledger {
         let mut ledger = Ledger {
             file,
             edited: HashSet::new(),
+            compressed: HashSet::new(),
             savings: Vec::new(),
+            refetches: 0,
         };
         if let Ok(content) = std::fs::read_to_string(&ledger.file) {
             for line in content.lines() {
@@ -49,9 +62,18 @@ impl Ledger {
                     Ok(Record::Edit { path }) => {
                         ledger.edited.insert(path);
                     }
-                    Ok(Record::Save { tool, r#in, out }) => {
+                    Ok(Record::Save {
+                        tool,
+                        r#in,
+                        out,
+                        path,
+                    }) => {
                         ledger.savings.push((tool, r#in, out));
+                        if let Some(p) = path {
+                            ledger.compressed.insert(p);
+                        }
                     }
+                    Ok(Record::Refetch { .. }) => ledger.refetches += 1,
                     Err(_) => {} // skip corrupt lines
                 }
             }
@@ -71,13 +93,41 @@ impl Ledger {
         self.edited.contains(path)
     }
 
-    pub fn note_saving(&mut self, tool: &str, tokens_in: usize, tokens_out: usize) {
+    /// `path` is recorded for Read so a later targeted Read of the same file
+    /// can be attributed as a refetch; other tools pass `None`.
+    pub fn note_saving(
+        &mut self,
+        tool: &str,
+        path: Option<&str>,
+        tokens_in: usize,
+        tokens_out: usize,
+    ) {
         self.savings.push((tool.to_string(), tokens_in, tokens_out));
+        if let Some(p) = path {
+            self.compressed.insert(p.to_string());
+        }
         self.append(&Record::Save {
             tool: tool.to_string(),
             r#in: tokens_in,
             out: tokens_out,
+            path: path.map(String::from),
         });
+    }
+
+    pub fn was_compressed(&self, path: &str) -> bool {
+        self.compressed.contains(path)
+    }
+
+    pub fn note_refetch(&mut self, path: &str) {
+        self.refetches += 1;
+        self.append(&Record::Refetch {
+            path: path.to_string(),
+        });
+    }
+
+    /// Targeted Reads back into files this session compressed.
+    pub fn refetches(&self) -> usize {
+        self.refetches
     }
 
     pub fn totals(&self) -> Totals {

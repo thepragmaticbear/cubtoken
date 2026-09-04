@@ -43,7 +43,9 @@ pub fn fold(content: &str, cfg: &GrepCfg) -> Option<String> {
                         let preview: Vec<&str> = files.iter().take(3).copied().collect();
                         let _ = writeln!(
                             out,
-                            "{}:{}:{}\n  [cubtoken: identical match in {} files: {}, …]",
+                            "{}:{}:{}\n  [cubtoken: identical match in {} files: {}, … \
+                             — rerun Grep with output_mode=\"files_with_matches\" \
+                             for the full file list]",
                             path,
                             line,
                             text,
@@ -150,6 +152,10 @@ mod tests {
         let raw = same_line_in_files(r#"    "lodash": "^4.17.21","#, 30);
         let out = fold(&raw, &cfg()).unwrap();
         assert!(out.contains("identical match in 30 files"), "{out}");
+        assert!(
+            out.contains("files_with_matches"),
+            "escape hatch for the collapsed files: {out}"
+        );
         // the match text appears once, not 30 times
         assert_eq!(out.matches("lodash").count(), 1, "{out}");
     }

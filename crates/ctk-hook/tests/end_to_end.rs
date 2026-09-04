@@ -136,3 +136,37 @@ fn read_disabled_passes_through() {
     let cfg = Config::load_from(None, Some("[read]\nenabled = false"));
     assert!(run_hook(&fixture("read_large"), &cfg).is_none());
 }
+
+#[test]
+fn run_hook_auto_loads_project_config_from_cwd() {
+    // Regression: the hook must read `<cwd>/.cubtoken.toml`, not just defaults.
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path().to_str().unwrap().to_string();
+
+    // a noisy but successful bash payload, rooted at the temp cwd
+    let mut v: serde_json::Value = serde_json::from_str(&fixture("bash_simple")).unwrap();
+    v["cwd"] = serde_json::json!(cwd);
+    v["tool_response"]["stdout"] =
+        serde_json::json!("\u{1b}[32mok\u{1b}[0m\n".repeat(200) + "done\n");
+
+    // no config file: bash compression is off by default → pass through
+    assert!(
+        ctk_hook::run_hook_auto(&v.to_string()).is_none(),
+        "bash is off without a config file"
+    );
+
+    // a project .cubtoken.toml under cwd enabling bash must take effect
+    std::fs::write(
+        dir.path().join(".cubtoken.toml"),
+        "[bash]\nenabled = true\n",
+    )
+    .unwrap();
+    let out = ctk_hook::run_hook_auto(&v.to_string())
+        .expect("project config from cwd should enable bash");
+    let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let stdout = parsed["hookSpecificOutput"]["updatedToolOutput"]["stdout"]
+        .as_str()
+        .unwrap();
+    assert!(!stdout.contains('\u{1b}'));
+    assert!(stdout.contains("done"));
+}

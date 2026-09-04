@@ -5,6 +5,7 @@ use ctk_hook::ledger::{Ledger, Totals};
 
 pub fn run() {
     let mut per_tool: std::collections::BTreeMap<String, Totals> = Default::default();
+    let mut refetches = 0usize;
 
     if let Ok(entries) = std::fs::read_dir(".cubtoken") {
         for entry in entries.flatten() {
@@ -16,6 +17,7 @@ pub fn run() {
                 continue;
             };
             let ledger = Ledger::open(std::path::Path::new(".cubtoken"), session);
+            refetches += ledger.refetches();
             for (tool, t) in ledger.per_tool() {
                 let e = per_tool.entry(tool).or_default();
                 e.tokens_in += t.tokens_in;
@@ -40,6 +42,15 @@ pub fn run() {
         grand.tokens_out += t.tokens_out;
     }
     print_row("TOTAL", &grand);
+    println!("\ncounts are estimates (~3.5 chars/token), not tokenizer output");
+
+    // The cost side: every targeted Read back into a file we compressed is a
+    // round trip the model would not have needed on the full text.
+    println!(
+        "follow-up Read(offset/limit) calls into compressed files: {refetches}\n\
+         a high count means skeletons are eliding what the model needs \
+         — raise read.threshold_tokens"
+    );
 }
 
 fn print_row(label: &str, t: &Totals) {

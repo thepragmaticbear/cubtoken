@@ -38,10 +38,12 @@ pub fn compress_read(
     let view = skeleton_view(content, file_path).unwrap_or_else(|| head_tail_view(content));
     let compressed = format!(
         "[cubtoken: compressed view of {file_path} — {} chars → skeleton. \
-         This is NOT the full file. Bracketed [La-Lb] ranges mark elided lines; \
-         to see any of them run Read(file_path={file_path}, offset=<first line>, \
-         limit=<line count>). Before quoting or editing this file, Read the exact \
-         target region first.]\n\n{view}",
+         This is NOT the full file. The Read tool adds its own sequential \
+         numbering down the left edge of this block; ignore it. The real file \
+         line numbers are the ones in this view, and bracketed [La-Lb] ranges \
+         mark elided lines — to see any of them run Read(file_path={file_path}, \
+         offset=<first line>, limit=<line count>). Before quoting or editing \
+         this file, Read the exact target region first.]\n\n{view}",
         content.chars().count()
     );
 
