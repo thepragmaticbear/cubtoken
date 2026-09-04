@@ -1,0 +1,29 @@
+#!/bin/sh
+# cubtoken PostToolUse hook wrapper for the Claude Code plugin install.
+#
+# `ctk init` bakes an absolute path into settings.json, which `cargo clean` or a
+# moved binary silently breaks. A plugin ships no binary, so resolve `ctk` at
+# call time instead.
+#
+# Invariant 1 (fail open): if `ctk` is missing we must still exit 0 with empty
+# stdout, so Claude Code keeps the original tool output. `ctk hook` itself never
+# exits non-zero, so exec-ing it preserves that.
+
+ctk=$(command -v ctk 2>/dev/null) || ctk=""
+
+if [ -z "$ctk" ]; then
+    for candidate in "$HOME/.cargo/bin/ctk" "$HOME/.local/bin/ctk" /usr/local/bin/ctk; do
+        if [ -x "$candidate" ]; then
+            ctk=$candidate
+            break
+        fi
+    done
+fi
+
+if [ -z "$ctk" ]; then
+    # Drain stdin so Claude Code's write side never sees EPIPE, then pass through.
+    cat >/dev/null 2>&1
+    exit 0
+fi
+
+exec "$ctk" hook
