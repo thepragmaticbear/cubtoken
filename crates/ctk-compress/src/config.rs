@@ -24,6 +24,7 @@ pub struct ReadCfg {
 pub struct GrepCfg {
     pub enabled: bool,
     pub max_matches_per_file: usize,
+    pub max_total_matches: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -58,6 +59,7 @@ impl Default for GrepCfg {
         Self {
             enabled: true,
             max_matches_per_file: 5,
+            max_total_matches: 100,
         }
     }
 }
@@ -96,6 +98,7 @@ impl ReadCfg {
 
 /// Raw deserialization layer: every field optional so files can be partial.
 #[derive(Debug, Default, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawConfig {
     #[serde(default)]
     read: RawRead,
@@ -110,6 +113,7 @@ struct RawConfig {
 }
 
 #[derive(Debug, Default, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawRead {
     enabled: Option<bool>,
     threshold_tokens: Option<usize>,
@@ -117,23 +121,28 @@ struct RawRead {
 }
 
 #[derive(Debug, Default, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawGrep {
     enabled: Option<bool>,
     max_matches_per_file: Option<usize>,
+    max_total_matches: Option<usize>,
 }
 
 #[derive(Debug, Default, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawGlob {
     enabled: Option<bool>,
     max_paths: Option<usize>,
 }
 
 #[derive(Debug, Default, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawBash {
     enabled: Option<bool>,
 }
 
 #[derive(Debug, Default, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawStats {
     ledger: Option<bool>,
 }
@@ -163,12 +172,33 @@ impl Config {
     /// hook calls this with the payload's `cwd` so a globally-installed hook
     /// still honors each project's config (and matches where the ledger lives).
     pub fn load_for(cwd: &std::path::Path) -> Self {
+        Self::try_load_for(cwd).unwrap_or_default()
+    }
+
+    /// Strict production loader. Invalid or unreadable configuration returns
+    /// an error so the hook can pass through instead of silently compressing
+    /// with defaults the user may have tried to disable.
+    pub fn try_load_for(cwd: &std::path::Path) -> Result<Self, String> {
         let global = std::env::var_os("HOME")
             .map(std::path::PathBuf::from)
             .map(|h| h.join(".config/cubtoken/config.toml"))
-            .and_then(|p| std::fs::read_to_string(p).ok());
-        let project = std::fs::read_to_string(cwd.join(".cubtoken.toml")).ok();
-        Self::load_from(global.as_deref(), project.as_deref())
+            .map(read_optional)
+            .transpose()?
+            .flatten();
+        let project_path = project_root(cwd).join(".cubtoken.toml");
+        let project = read_optional(project_path)?;
+
+        let mut cfg = Config::default();
+        for (name, raw_str) in [
+            ("global", global.as_deref()),
+            ("project", project.as_deref()),
+        ] {
+            let Some(raw_str) = raw_str else { continue };
+            let raw = toml::from_str::<RawConfig>(raw_str)
+                .map_err(|error| format!("invalid {name} config: {error}"))?;
+            cfg.apply(raw);
+        }
+        Ok(cfg)
     }
 
     fn apply(&mut self, raw: RawConfig) {
@@ -188,6 +218,9 @@ impl Config {
         if let Some(v) = raw.grep.max_matches_per_file {
             self.grep.max_matches_per_file = v;
         }
+        if let Some(v) = raw.grep.max_total_matches {
+            self.grep.max_total_matches = v;
+        }
         if let Some(v) = raw.glob.enabled {
             self.glob.enabled = v;
         }
@@ -200,6 +233,22 @@ impl Config {
         if let Some(v) = raw.stats.ledger {
             self.stats.ledger = v;
         }
+    }
+}
+
+pub fn project_root(cwd: &std::path::Path) -> std::path::PathBuf {
+    let cwd = cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf());
+    cwd.ancestors()
+        .find(|dir| dir.join(".cubtoken.toml").is_file() || dir.join(".git").exists())
+        .unwrap_or(&cwd)
+        .to_path_buf()
+}
+
+fn read_optional(path: std::path::PathBuf) -> Result<Option<String>, String> {
+    match std::fs::read_to_string(&path) {
+        Ok(content) => Ok(Some(content)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(format!("cannot read {}: {error}", path.display())),
     }
 }
 
@@ -238,6 +287,33 @@ mod tests {
             Some("[read]\nthreshold_tokens = 7"),
         );
         assert_eq!(c.read.threshold_tokens, 7);
+    }
+
+    #[test]
+    fn strict_loader_rejects_unknown_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(".cubtoken.toml"),
+            "[read]\nthreshold_token = 7\n",
+        )
+        .unwrap();
+        assert!(Config::try_load_for(dir.path()).is_err());
+    }
+
+    #[test]
+    fn project_config_is_found_from_a_subdirectory() {
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("src/deep");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(
+            dir.path().join(".cubtoken.toml"),
+            "[read]\nthreshold_tokens = 77\n",
+        )
+        .unwrap();
+        assert_eq!(
+            Config::try_load_for(&nested).unwrap().read.threshold_tokens,
+            77
+        );
     }
 
     #[test]

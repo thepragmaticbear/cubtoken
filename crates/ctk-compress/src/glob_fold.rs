@@ -14,7 +14,10 @@ pub fn fold_paths(paths: &[String], max_paths: usize) -> Option<String> {
     let mut by_dir: HashMap<&str, Vec<&str>> = HashMap::new();
     let mut order: Vec<&str> = Vec::new();
     for p in paths {
-        let (dir, file) = p.rsplit_once('/').unwrap_or(("", p.as_str()));
+        let (dir, file) = p
+            .rfind(['/', '\\'])
+            .map(|index| (&p[..index], &p[index + 1..]))
+            .unwrap_or(("", p.as_str()));
         by_dir
             .entry(dir)
             .or_insert_with(|| {
@@ -33,14 +36,19 @@ pub fn fold_paths(paths: &[String], max_paths: usize) -> Option<String> {
     for dir in &order {
         let files = &by_dir[dir];
         let label = if dir.is_empty() { "." } else { *dir };
+        let separator = if dir.contains('\\') && !dir.contains('/') {
+            '\\'
+        } else {
+            '/'
+        };
         if files.len() <= FULL_LISTING_MAX {
             for f in files {
-                let _ = writeln!(out, "{label}/{f}");
+                let _ = writeln!(out, "{label}{separator}{f}");
             }
         } else {
             let _ = writeln!(
                 out,
-                "{label}/ ({} files{})",
+                "{label}{separator} ({} files{})",
                 files.len(),
                 dominant_extensions(files)
             );
@@ -130,5 +138,17 @@ mod tests {
             "{out}"
         );
         assert!(out.contains("src/gen/ (200 files, mostly .ts)"), "{out}");
+    }
+
+    #[test]
+    fn windows_paths_are_grouped_by_directory() {
+        let paths: Vec<String> = (0..300)
+            .map(|i| format!(r"C:\repo\src\components\C{i}.tsx"))
+            .collect();
+        let out = fold_paths(&paths, 50).unwrap();
+        assert!(
+            out.contains(r"C:\repo\src\components\ (300 files, mostly .tsx)"),
+            "{out}"
+        );
     }
 }

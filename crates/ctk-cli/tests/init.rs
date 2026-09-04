@@ -21,9 +21,10 @@ fn init_installs_posttooluse_hook() {
     assert_eq!(hook["matcher"], MATCHER);
     let cmd = hook["hooks"][0]["command"].as_str().unwrap();
     assert!(
-        cmd.ends_with("ctk hook") || cmd.contains("ctk\" hook"),
+        cmd.ends_with("ctk") || cmd.ends_with("ctk.exe"),
         "command was: {cmd}"
     );
+    assert_eq!(hook["hooks"][0]["args"], serde_json::json!(["hook"]));
     assert_eq!(hook["hooks"][0]["type"], "command");
     // starter project config written
     assert!(dir.path().join(".cubtoken.toml").exists());
@@ -51,6 +52,30 @@ fn init_is_idempotent_and_preserves_existing_settings() {
     let hooks = s["hooks"]["PostToolUse"].as_array().unwrap();
     assert_eq!(hooks.len(), 2, "theirs + ours exactly once: {hooks:?}");
     assert_eq!(hooks[0]["matcher"], "Other");
+}
+
+#[test]
+fn init_does_not_remove_an_unrelated_command_with_a_ctk_suffix() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".claude")).unwrap();
+    std::fs::write(
+        dir.path().join(".claude/settings.json"),
+        r#"{"hooks":{"PostToolUse":[{"matcher":"Other","hooks":[{"type":"command","command":"/usr/local/bin/protectk hook"}]}]}}"#,
+    )
+    .unwrap();
+    Command::cargo_bin("ctk")
+        .unwrap()
+        .current_dir(dir.path())
+        .arg("init")
+        .assert()
+        .success();
+    assert_eq!(
+        settings(dir.path())["hooks"]["PostToolUse"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
 }
 
 #[test]
@@ -111,6 +136,11 @@ fn doctor_finds_a_hook_in_settings_local_json() {
     let home = tempfile::tempdir().unwrap();
     let bin = dir.path().join("ctk");
     std::fs::write(&bin, "#!/bin/sh\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
     std::fs::create_dir_all(dir.path().join(".claude")).unwrap();
     std::fs::write(
         dir.path().join(".claude/settings.local.json"),
@@ -154,5 +184,8 @@ fn doctor_fails_when_the_installed_binary_is_gone() {
         .assert()
         .failure();
     let out = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
-    assert!(out.contains("FAIL  hook binary exists"), "got: {out}");
+    assert!(
+        out.contains("FAIL  hook binary is executable"),
+        "got: {out}"
+    );
 }

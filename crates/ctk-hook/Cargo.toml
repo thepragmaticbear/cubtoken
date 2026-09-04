@@ -1,13 +1,15 @@
 [package]
 name = "ctk-hook"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+description = "Claude Code PostToolUse protocol adapter for cubtoken"
 
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
-ctk-compress = { path = "../ctk-compress" }
+ctk-compress = { version = "0.1.0", path = "../ctk-compress" }
 
 [dev-dependencies]
 tempfile = "3.27.0"

@@ -142,6 +142,15 @@ fn unwrap_decl<'t>(node: Node<'t>) -> Node<'t> {
     }
 }
 
+fn body_node<'t>(node: Node<'t>) -> Option<Node<'t>> {
+    if let Some(body) = node.child_by_field_name("body") {
+        return Some(body);
+    }
+    let mut cursor = node.walk();
+    let found = node.named_children(&mut cursor).find_map(body_node);
+    found
+}
+
 const MAX_IMPORTS_SHOWN: usize = 10;
 const GUTTER: &str = "     ";
 
@@ -217,7 +226,17 @@ impl<'a> Builder<'a> {
         // signature is never hidden behind its decorators.
         let sig = decl.start_position().row;
         let end = outer.end_position().row;
-        for row in outer.start_position().row..=sig {
+        let signature_end = body_node(decl)
+            .map(|body| {
+                if self.lang == Lang::Python && body.start_position().row > sig {
+                    body.start_position().row - 1
+                } else {
+                    body.start_position().row
+                }
+            })
+            .unwrap_or_else(|| decl.end_position().row)
+            .min(end);
+        for row in outer.start_position().row..=signature_end {
             self.emit_verbatim(row);
         }
         self.decls += 1;
@@ -228,8 +247,8 @@ impl<'a> Builder<'a> {
                 return;
             }
         }
-        if end > sig {
-            self.emit_range_marker(sig + 2, end + 1);
+        if end > signature_end {
+            self.emit_range_marker(signature_end + 2, end + 1);
             self.covered = Some(end);
         }
     }
