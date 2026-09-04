@@ -45,11 +45,15 @@ pub fn skeleton(src: &str, lang: Lang) -> Option<Skeleton> {
         shown: Vec::new(),
         decls: 0,
         lang,
+        covered: None,
+        open_marker: None,
     };
     b.process_children(tree.root_node(), 0);
     if b.decls == 0 {
         return None;
     }
+    let total = b.lines.len();
+    b.emit_gap(total);
     Some(Skeleton {
         rendered: b.out,
         shown_lines: b.shown,
@@ -147,6 +151,13 @@ struct Builder<'a> {
     shown: Vec<(usize, String)>,
     decls: usize,
     lang: Lang,
+    /// Highest 0-based row already shown or covered by an elision marker.
+    /// Anything skipped past it must be advertised (escape-hatch invariant).
+    covered: Option<usize>,
+    /// While the last line written is a `… [La-Lb]` marker: its byte offset in
+    /// `out` and its start line, so an adjacent gap widens it instead of
+    /// stacking a second marker (closing braces would otherwise emit a run).
+    open_marker: Option<(usize, usize)>,
 }
 
 impl<'a> Builder<'a> {
@@ -195,14 +206,20 @@ impl<'a> Builder<'a> {
                 "… +{} more imports [L{first_hidden}-L{last}]",
                 group.len() - shown
             ));
+            self.covered = Some(last - 1);
         }
     }
 
     fn emit_decl(&mut self, outer: Node<'_>, decl: Node<'_>, depth: usize) {
-        self.emit_preceding_comments(outer);
-        let start = outer.start_position().row;
+        self.emit_prefix_lines(outer);
+        // `outer` may wrap `decl` (Python `@decorator`, TS `export`): show every
+        // row from the wrapper down to the declaration's own start, so the
+        // signature is never hidden behind its decorators.
+        let sig = decl.start_position().row;
         let end = outer.end_position().row;
-        self.emit_verbatim(start);
+        for row in outer.start_position().row..=sig {
+            self.emit_verbatim(row);
+        }
         self.decls += 1;
 
         if depth == 0 && container_kinds(self.lang).contains(&decl.kind()) {
@@ -211,13 +228,16 @@ impl<'a> Builder<'a> {
                 return;
             }
         }
-        if end > start {
-            self.emit_marker(&format!("… [L{}-L{}]", start + 2, end + 1));
+        if end > sig {
+            self.emit_range_marker(sig + 2, end + 1);
+            self.covered = Some(end);
         }
     }
 
-    /// Contiguous comment lines immediately above a declaration (doc comments).
-    fn emit_preceding_comments(&mut self, node: Node<'_>) {
+    /// Contiguous comments *and attributes* immediately above a declaration.
+    /// Rust `#[derive(...)]` / `#[cfg(...)]` are siblings of the item, not
+    /// children, so they are load-bearing context that would otherwise vanish.
+    fn emit_prefix_lines(&mut self, node: Node<'_>) {
         let mut rows = Vec::new();
         let mut expected_end = node.start_position().row;
         let mut prev = node.prev_named_sibling();
@@ -228,7 +248,8 @@ impl<'a> Builder<'a> {
             } else {
                 p.end_position().row
             };
-            if !p.kind().contains("comment") || p_end + 1 != expected_end {
+            let attached = p.kind().contains("comment") || p.kind() == "attribute_item";
+            if !attached || p_end + 1 != expected_end {
                 break;
             }
             for row in (p.start_position().row..=p_end).rev() {
@@ -243,14 +264,45 @@ impl<'a> Builder<'a> {
     }
 
     fn emit_verbatim(&mut self, row: usize) {
-        let Some(text) = self.lines.get(row) else {
+        let Some(&text) = self.lines.get(row) else {
             return;
         };
+        self.emit_gap(row);
         self.out.push_str(&format!("{:>5}  {text}\n", row + 1));
-        self.shown.push((row + 1, (*text).to_string()));
+        self.shown.push((row + 1, text.to_string()));
+        self.covered = Some(row);
+        self.open_marker = None;
+    }
+
+    /// Advertise rows skipped between the last covered row and `upto`
+    /// (exclusive, 0-based). Blank-only gaps are not worth a marker.
+    fn emit_gap(&mut self, upto: usize) {
+        let from = self.covered.map_or(0, |c| c + 1);
+        let upto = upto.min(self.lines.len());
+        if from >= upto || self.lines[from..upto].iter().all(|l| l.trim().is_empty()) {
+            return;
+        }
+        self.emit_range_marker(from + 1, upto);
+        self.covered = Some(upto - 1);
     }
 
     fn emit_marker(&mut self, text: &str) {
         self.out.push_str(&format!("{GUTTER}  {text}\n"));
+        self.open_marker = None;
+    }
+
+    /// Elision marker for lines `from..=to` (1-based). Widens the marker
+    /// already at the tail of `out` when this range continues it.
+    fn emit_range_marker(&mut self, from: usize, to: usize) {
+        let (offset, start) = match self.open_marker {
+            Some((offset, start)) => {
+                self.out.truncate(offset);
+                (offset, start)
+            }
+            None => (self.out.len(), from),
+        };
+        self.out
+            .push_str(&format!("{GUTTER}  … [L{start}-L{to}]\n"));
+        self.open_marker = Some((offset, start));
     }
 }

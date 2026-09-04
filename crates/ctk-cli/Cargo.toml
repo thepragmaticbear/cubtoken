@@ -15,4 +15,5 @@ ctk-hook = { path = "../ctk-hook" }
 
 [dev-dependencies]
 assert_cmd = "2"
+serde_json.workspace = true
 tempfile = "3"

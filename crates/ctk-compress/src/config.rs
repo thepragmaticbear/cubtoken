@@ -152,13 +152,22 @@ impl Config {
         cfg
     }
 
-    /// Load from `~/.config/cubtoken/config.toml` and `<cwd>/.cubtoken.toml`.
+    /// Load from `~/.config/cubtoken/config.toml` and `./.cubtoken.toml`
+    /// (project file relative to the process working directory).
     pub fn load() -> Self {
+        Self::load_for(std::path::Path::new("."))
+    }
+
+    /// Load from `~/.config/cubtoken/config.toml` then `<cwd>/.cubtoken.toml`,
+    /// layered over defaults. Missing or unreadable files are skipped. The
+    /// hook calls this with the payload's `cwd` so a globally-installed hook
+    /// still honors each project's config (and matches where the ledger lives).
+    pub fn load_for(cwd: &std::path::Path) -> Self {
         let global = std::env::var_os("HOME")
             .map(std::path::PathBuf::from)
             .map(|h| h.join(".config/cubtoken/config.toml"))
             .and_then(|p| std::fs::read_to_string(p).ok());
-        let project = std::fs::read_to_string(".cubtoken.toml").ok();
+        let project = std::fs::read_to_string(cwd.join(".cubtoken.toml")).ok();
         Self::load_from(global.as_deref(), project.as_deref())
     }
 

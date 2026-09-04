@@ -15,6 +15,17 @@ pub fn run_hook(stdin: &str, cfg: &Config) -> Option<String> {
     serde_json::to_string(&HookOutput::updated(updated)).ok()
 }
 
+/// Production entry point: like [`run_hook`] but loads layered config from the
+/// payload's `cwd` (global `~/.config/cubtoken/config.toml`, then that
+/// project's `.cubtoken.toml`) rather than taking a `Config`. Fail-open: a
+/// parse failure or absent config falls back to defaults / pass-through.
+pub fn run_hook_auto(stdin: &str) -> Option<String> {
+    let payload: HookPayload = serde_json::from_str(stdin).ok()?;
+    let cfg = Config::load_for(std::path::Path::new(&payload.cwd));
+    let updated = dispatch(&payload, &cfg)?;
+    serde_json::to_string(&HookOutput::updated(updated)).ok()
+}
+
 const EDIT_TOOLS: &[&str] = &["Edit", "Write", "NotebookEdit"];
 
 fn ledger_for(payload: &HookPayload) -> Ledger {
@@ -43,13 +54,24 @@ fn dispatch(payload: &HookPayload, cfg: &Config) -> Option<serde_json::Value> {
             if ledger.is_protected(path) {
                 return None;
             }
+            // A targeted Read into a file we already compressed is the model
+            // buying back what we elided — the cost side of the savings
+            // number. Record it before passing through.
+            if payload.tool_input.get("offset").is_some()
+                || payload.tool_input.get("limit").is_some()
+            {
+                if cfg.stats.ledger && ledger.was_compressed(path) {
+                    ledger.note_refetch(path);
+                }
+                return None;
+            }
             let outcome = ctk_compress::read::compress_read(
                 &payload.tool_input,
                 &payload.tool_response,
                 cfg,
             )?;
             if cfg.stats.ledger {
-                ledger.note_saving("Read", outcome.tokens_in, outcome.tokens_out);
+                ledger.note_saving("Read", Some(path), outcome.tokens_in, outcome.tokens_out);
             }
             Some(outcome.updated_response)
         }
@@ -65,7 +87,12 @@ fn dispatch(payload: &HookPayload, cfg: &Config) -> Option<serde_json::Value> {
             let folded = ctk_compress::grep::fold(content, &cfg.grep)?;
             if cfg.stats.ledger {
                 use ctk_compress::estimate::est_tokens;
-                ledger_for(payload).note_saving("Grep", est_tokens(content), est_tokens(&folded));
+                ledger_for(payload).note_saving(
+                    "Grep",
+                    None,
+                    est_tokens(content),
+                    est_tokens(&folded),
+                );
             }
             let mut updated = payload.tool_response.clone();
             updated["content"] = serde_json::Value::String(folded.clone());
@@ -87,11 +114,18 @@ fn dispatch(payload: &HookPayload, cfg: &Config) -> Option<serde_json::Value> {
             if cfg.stats.ledger {
                 use ctk_compress::estimate::est_tokens;
                 let orig = filenames.join("\n");
-                ledger_for(payload).note_saving("Glob", est_tokens(&orig), est_tokens(&folded));
+                ledger_for(payload).note_saving(
+                    "Glob",
+                    None,
+                    est_tokens(&orig),
+                    est_tokens(&folded),
+                );
             }
             let mut updated = payload.tool_response.clone();
             updated["filenames"] = serde_json::json!([folded]);
-            updated["numFiles"] = serde_json::Value::from(1);
+            // filenames now holds one folded blob, but the match count is a
+            // fact about the search — keep it true.
+            updated["numFiles"] = serde_json::Value::from(filenames.len());
             Some(updated)
         }
         "Bash" => {
@@ -117,7 +151,12 @@ fn dispatch(payload: &HookPayload, cfg: &Config) -> Option<serde_json::Value> {
             let stripped = ctk_compress::bash::strip(stdout)?;
             if cfg.stats.ledger {
                 use ctk_compress::estimate::est_tokens;
-                ledger_for(payload).note_saving("Bash", est_tokens(stdout), est_tokens(&stripped));
+                ledger_for(payload).note_saving(
+                    "Bash",
+                    None,
+                    est_tokens(stdout),
+                    est_tokens(&stripped),
+                );
             }
             let mut updated = payload.tool_response.clone();
             updated["stdout"] = serde_json::Value::String(stripped);

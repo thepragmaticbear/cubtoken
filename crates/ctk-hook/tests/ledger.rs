@@ -20,8 +20,8 @@ fn edited_file_is_protected_for_session() {
 fn savings_accumulate() {
     let dir = tempfile::tempdir().unwrap();
     let mut l = Ledger::open(dir.path(), "s");
-    l.note_saving("Read", 10_000, 1_500);
-    l.note_saving("Read", 4_000, 900);
+    l.note_saving("Read", Some("/a.rs"), 10_000, 1_500);
+    l.note_saving("Read", Some("/b.rs"), 4_000, 900);
     let s = Ledger::open(dir.path(), "s").totals();
     assert_eq!((s.tokens_in, s.tokens_out), (14_000, 2_400));
     let per_tool = Ledger::open(dir.path(), "s").per_tool();
@@ -81,4 +81,50 @@ fn savings_are_recorded_by_run_hook() {
     let t = l.totals();
     assert!(t.tokens_in > t.tokens_out);
     assert!(t.tokens_out > 0);
+}
+
+fn offset_read_payload(cwd: &str) -> String {
+    serde_json::json!({
+        "tool_name": "Read",
+        "session_id": "ledger-e2e",
+        "cwd": cwd,
+        "tool_input": {"file_path": "/repo/src/hot.rs", "offset": 40, "limit": 20},
+        "tool_response": {"type": "text", "file": {
+            "filePath": "/repo/src/hot.rs", "content": "fn x() {}\n",
+            "numLines": 1, "startLine": 40, "totalLines": 500
+        }}
+    })
+    .to_string()
+}
+
+#[test]
+fn targeted_read_after_compression_is_recorded_as_a_refetch() {
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path().to_str().unwrap().to_string();
+    let cfg = Config::default();
+    let data = dir.path().join(".cubtoken");
+
+    // a targeted read with nothing compressed yet is not a refetch
+    assert!(run_hook(&offset_read_payload(&cwd), &cfg).is_none());
+    assert_eq!(Ledger::open(&data, "ledger-e2e").refetches(), 0);
+
+    // compress the file, then read back into it
+    assert!(run_hook(&read_payload(&cwd, 60_000), &cfg).is_some());
+    assert!(run_hook(&offset_read_payload(&cwd), &cfg).is_none());
+    assert_eq!(
+        Ledger::open(&data, "ledger-e2e").refetches(),
+        1,
+        "the round trip compression forced must be countable"
+    );
+}
+
+#[test]
+fn refetch_count_survives_a_fresh_ledger_handle() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut l = Ledger::open(dir.path(), "s");
+    l.note_saving("Read", Some("/a.rs"), 100, 10);
+    assert!(l.was_compressed("/a.rs"));
+    l.note_refetch("/a.rs");
+    assert_eq!(Ledger::open(dir.path(), "s").refetches(), 1);
+    assert!(Ledger::open(dir.path(), "s").was_compressed("/a.rs"));
 }
