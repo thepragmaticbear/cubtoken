@@ -101,3 +101,58 @@ fn doctor_passes_after_init_and_fails_before() {
     let out = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
     assert!(out.contains("PASS"), "doctor output: {out}");
 }
+
+#[test]
+fn doctor_finds_a_hook_in_settings_local_json() {
+    // `init` writes an absolute binary path, so users installing per-machine
+    // land in settings.local.json. Doctor used to ignore that file and report
+    // FAIL on a working install.
+    let dir = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let bin = dir.path().join("ctk");
+    std::fs::write(&bin, "#!/bin/sh\n").unwrap();
+    std::fs::create_dir_all(dir.path().join(".claude")).unwrap();
+    std::fs::write(
+        dir.path().join(".claude/settings.local.json"),
+        serde_json::json!({"hooks": {"PostToolUse": [{
+            "matcher": MATCHER,
+            "hooks": [{"type": "command", "command": format!("{} hook", bin.display())}]
+        }]}})
+        .to_string(),
+    )
+    .unwrap();
+
+    Command::cargo_bin("ctk")
+        .unwrap()
+        .current_dir(dir.path())
+        .env("HOME", home.path())
+        .arg("doctor")
+        .assert()
+        .success();
+}
+
+#[test]
+fn doctor_fails_when_the_installed_binary_is_gone() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".claude")).unwrap();
+    std::fs::write(
+        dir.path().join(".claude/settings.json"),
+        serde_json::json!({"hooks": {"PostToolUse": [{
+            "matcher": MATCHER,
+            "hooks": [{"type": "command", "command": "/nonexistent/build/dir/ctk hook"}]
+        }]}})
+        .to_string(),
+    )
+    .unwrap();
+
+    let assert = Command::cargo_bin("ctk")
+        .unwrap()
+        .current_dir(dir.path())
+        .env("HOME", home.path())
+        .arg("doctor")
+        .assert()
+        .failure();
+    let out = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    assert!(out.contains("FAIL  hook binary exists"), "got: {out}");
+}
