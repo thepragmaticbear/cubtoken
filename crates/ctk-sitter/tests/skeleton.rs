@@ -267,3 +267,50 @@ fn nested_python_class_methods_survive() {
     assert!(out.contains("class Inner"), "elided from:\n{out}");
     assert!(out.contains("def a"), "elided from:\n{out}");
 }
+
+// `body_node` used to find *any* nested `body` field, so a data literal
+// holding a lambda/arrow/closure reported that inner body as the end of the
+// statement's signature and truncated it behind a misleading marker.
+
+#[test]
+fn data_literals_holding_lambdas_are_not_truncated() {
+    let src = "HANDLERS = {\n    \"a\": lambda x: fn(x),\n    \"b\": lambda x: g(x),\n}\n";
+    let out = skeleton(src, Lang::Python).unwrap().rendered;
+    assert!(out.contains("lambda x: g(x)"), "truncated:\n{out}");
+    assert!(!out.contains("[L"), "spurious elision marker:\n{out}");
+}
+
+#[test]
+fn comprehensions_are_not_truncated() {
+    let src = "SQUARES = [\n    n * n\n    for n in range(10)\n]\n";
+    let out = skeleton(src, Lang::Python).unwrap().rendered;
+    assert!(out.contains("for n in range(10)"), "truncated:\n{out}");
+}
+
+#[test]
+fn typescript_object_of_arrow_fns_is_not_truncated() {
+    let src =
+        "export const handlers = {\n  a: (x: number) => fn(x),\n  b: (x: number) => g(x),\n};\n";
+    let out = skeleton(src, Lang::TypeScript).unwrap().rendered;
+    assert!(out.contains("b: (x: number) => g(x)"), "truncated:\n{out}");
+}
+
+#[test]
+fn rust_static_holding_a_closure_is_not_truncated() {
+    let src = "static R: Lazy<Map> = Lazy::new(|| {\n    let mut m = Map::new();\n    m.insert(\"a\", 1);\n    m\n});\n";
+    let out = skeleton(src, Lang::Rust).unwrap().rendered;
+    assert!(out.contains("m.insert(\"a\", 1)"), "truncated:\n{out}");
+}
+
+#[test]
+fn const_arrow_function_body_still_elides() {
+    // the case the value-chain descent exists for: the value *is* the function
+    let src = "export const handler = async (req: Request) => {\n  const a = 1;\n  const b = 2;\n  return a + b;\n};\n";
+    let out = skeleton(src, Lang::TypeScript).unwrap().rendered;
+    assert!(
+        out.contains("export const handler"),
+        "signature lost:\n{out}"
+    );
+    assert!(!out.contains("const a = 1"), "body not elided:\n{out}");
+    assert!(out.contains("[L"), "elision not advertised:\n{out}");
+}

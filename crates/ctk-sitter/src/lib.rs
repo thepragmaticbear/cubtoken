@@ -186,13 +186,49 @@ fn unwrap_decl<'t>(node: Node<'t>) -> Node<'t> {
     }
 }
 
+/// A value that is *itself* a function, so its body is a body to elide.
+/// A function buried inside an object literal, array or call argument is not:
+/// `const handler = async () => {…}` elides its body, but
+/// `HANDLERS = {"a": lambda x: f(x), …}` is a data shape to show whole.
+fn is_function_like(kind: &str) -> bool {
+    matches!(
+        kind,
+        "arrow_function"
+            | "function"
+            | "function_expression"
+            | "generator_function"
+            | "lambda"
+            | "closure_expression"
+    )
+}
+
+/// The declaration's own body, if it has one.
+///
+/// Follows only the direct value chain (`value`/`right`, through a lone
+/// declarator), never a general descendant search: `body_node` used to find
+/// any nested `body` field, so an assignment holding a lambda or comprehension
+/// reported that inner body as the end of its signature and truncated the
+/// statement mid-expression behind a misleading `[La-Lb]` marker.
 fn body_node<'t>(node: Node<'t>) -> Option<Node<'t>> {
     if let Some(body) = node.child_by_field_name("body") {
         return Some(body);
     }
-    let mut cursor = node.walk();
-    let found = node.named_children(&mut cursor).find_map(body_node);
-    found
+    let next = node
+        .child_by_field_name("value")
+        .or_else(|| node.child_by_field_name("right"))
+        .or_else(|| {
+            // `lexical_declaration` wraps a lone `variable_declarator`
+            let mut cursor = node.walk();
+            let mut named = node.named_children(&mut cursor);
+            match (named.next(), named.next()) {
+                (Some(only), None) => Some(only),
+                _ => None,
+            }
+        })?;
+    if next.child_by_field_name("body").is_some() && !is_function_like(next.kind()) {
+        return None;
+    }
+    body_node(next)
 }
 
 const MAX_IMPORTS_SHOWN: usize = 10;

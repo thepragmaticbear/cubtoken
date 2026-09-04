@@ -98,6 +98,8 @@ Skeletons elided the one thing the model reads a file *for*. `pub struct Config 
 
 Measured: `tests/fixtures/read_large.json` is byte-identical before and after (26,118 → 8,105 chars, 69% saved) — that fixture is all functions, so the change costs nothing where structs are absent and only pays where they are present.
 
+**`body_node` follow-up (same day, from ultrareview).** `body_node` searched *any* named descendant for a `body` field, so a declaration whose value merely *contained* a function reported that inner body as the end of its own signature — `HANDLERS = {"a": lambda x: f(x), ...}` rendered its first line then a misleading `… [L2-L5]`. Pre-existing for Rust `static`/`const` and TS `lexical_declaration`; adding Python `expression_statement` to `decl_kinds` widened it. Now the descent follows only the direct value chain (`value`/`right`, through a lone declarator) and stops at anything not `is_function_like`. The case the descent exists for — `export const handler = async () => {…}`, whose value *is* the function — still elides its body. Removing the recursion outright passes every test but silently regresses that very common TS shape, so it isn't the fix.
+
 Test-fixture gotcha: `crates/ctk-sitter/tests/corpus/sample.rs` is ~3.5KB, and with struct bodies kept the fixed ~600-char banner pushes it past the 30% savings guard — `compress_read` correctly declines. Three `read.rs` unit tests now build their input with `big_sample()` (`SAMPLE.repeat(4)`) rather than loosening the guard.
 
 ## Deliberately not done
