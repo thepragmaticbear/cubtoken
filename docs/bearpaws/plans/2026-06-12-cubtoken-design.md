@@ -204,3 +204,46 @@ ledger = true
 2. Default `read.threshold_tokens` = 2000 — too aggressive? (Claude Code itself pages reads at its own internal limit; we compress below that.)
 3. Phase 4 (MCP/index) is deliberately deferred — agree, or is the index the part you care most about?
 4. License/publishing intent (crates.io? GitHub public?) — affects CI scaffolding in Phase 1.
+
+---
+
+## Addendum — 2026-09-04: second host
+
+The spec above is left as written. This records what the first port to another
+harness actually cost, because §2's non-goals bet on it being cheap:
+
+> Cursor/Windsurf adapters — Claude Code first; the hook core is host-agnostic
+> by design so adapters can come later.
+
+That held, with one correction.
+
+**What was free.** `ctk-compress` stayed untouched apart from one change below.
+The OpenCode adapter (`packages/opencode/`) translates that host's
+`tool.execute.after` payload into the Claude Code hook shape and shells out to
+`ctk hook` — no new Rust entry point, no second protocol implementation. Host
+choice is a single JS file.
+
+**What wasn't.** Invariant 2 is host-dependent and the spec didn't say so. The
+escape hatch named `Read(file_path=…)`, which OpenCode has no such tool for, so
+a compressed view there pointed the model at a call it could not make. Fixed
+with `CUBTOKEN_HARNESS` (`read.rs::HarnessNames`), read from the environment
+because the *adapter* knows the host, not the user and not the config file. Any
+future host has to answer the same question before it is correct.
+
+**Layout added since §3.** `plugins/cubtoken/` (the Claude Code plugin form of
+the same hook, listed from a repo-root `.claude-plugin/marketplace.json`) and
+`packages/opencode/`.
+
+**Hosts ruled out, with reasons, so this isn't re-litigated:**
+
+| Host | Verdict |
+|---|---|
+| Claude Code | `PostToolUse` + `updatedToolOutput` replaces a result. Primary. |
+| OpenCode | `tool.execute.after` receives the object that is returned to the model; mutating `output.output` works. Verified in `session/tools.ts`. |
+| Codex CLI | **Blocked.** `PostToolUse` returns only `systemMessage` / `continue` / `stopReason` — no output replacement. Its shell-first tool inventory is the second problem, not the first. |
+| Antigravity | **Blocked.** `PostToolUse` receives `stepIdx` + `error` and must print `{}`; it is never told which tool ran. `PreToolUse` can rewrite args via `overwrite`, so clamping `view_file` to a line range is the only available lever. |
+
+**Scope actually shipped for OpenCode:** `read` compression and `edit`/`write`
+ledger protection. Grep, glob and bash pass through — §7's dogfooding data says
+the measured savings are on large reads, so the other three would have meant
+reverse-engineering three more output formats for unproven gain.

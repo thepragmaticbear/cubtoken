@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `cubtoken` is a single Rust binary (`ctk`) that installs as a Claude Code **PostToolUse hook** and rewrites native tool outputs (`Read`/`Grep`/`Glob`/`Bash`) *before they reach the model*, via the `updatedToolOutput` field. Large file Reads become tree-sitter signature skeletons; Grep folds per file; Glob folds into a directory tree. It targets the gap stream compressors like rtk can't reach — Claude Code's built-in Read/Grep/Glob bypass the Bash tool entirely.
 
+A second host is wired up: **OpenCode**, through `packages/opencode/` (its `tool.execute.after` plugin hook can replace a tool result the same way). Codex CLI and Antigravity cannot host cubtoken — neither one's post-tool hook can replace a tool result at all.
+
 ## Commands
 
 ```sh
@@ -60,6 +62,8 @@ Two non-Rust install paths sit beside the crates:
 - **Bash compression is opt-in (`bash.enabled = false`)** to coexist with rtk, which owns Bash. Leave it off unless deliberately enabled.
 - **tree-sitter row gotcha:** a node ending at a newline reports end row = next row, col 0. Comment-adjacency logic in `ctk-sitter` must normalize this.
 - **Hooks snapshot at session start.** After `ctk init` or reinstalling, the user must restart their Claude Code session for changes to take effect.
+- **OpenCode's read output is shaped differently from Claude Code's.** Claude passes raw source in `/file/content`; OpenCode passes `<path>…</path>\n<type>file</type>\n<content>\n1: line\n…\n\n(note)\n</content>` with the line numbers **inside the string**. `packages/opencode/index.js` strips those prefixes before handing text to `ctk` and re-adds sequential ones afterwards — don't feed numbered text to `ctk-sitter`, it won't parse. Its `parseRead` bails on any unexpected shape rather than guessing, because a wrong guess breaks invariant 3.
+- **Two places know the hook matcher.** `init::MATCHER` and `plugins/cubtoken/hooks/hooks.json`. `crates/ctk-cli/tests/plugin.rs::matcher_matches_init` fails if they drift.
 - **The on-disk directory is still `~/repos/smalltoke`** (project/binary/crates were renamed smalltoke→cubtoken, stk→ctk, but the dir was intentionally left to preserve the session/memory path). Fixture sample paths still mention `stk-capture` — that's opaque recorded data, leave it.
 
 ## Conventions
