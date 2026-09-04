@@ -1,8 +1,10 @@
 [package]
 name = "ctk-sitter"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+description = "Tree-sitter signature skeletons for cubtoken"
 
 [dependencies]
 tree-sitter = "0.26.9"

@@ -148,3 +148,34 @@ fn typescript_exports_have_no_unadvertised_gaps() {
     let src = "import React from \"react\";\n\nexport default function App() {\n  const a = 1;\n  return a;\n}\n\nexport const helper = (x: number) => {\n  return x * 2;\n};\n";
     assert_fully_advertised(src, Lang::TypeScript);
 }
+
+#[test]
+fn multiline_signatures_are_preserved_across_languages() {
+    let cases = [
+        (
+            Lang::Rust,
+            "pub fn create_user(\n    name: String,\n    permissions: Permissions,\n) -> Result<User> {\n    todo!()\n}\n",
+            "permissions: Permissions",
+        ),
+        (
+            Lang::TypeScript,
+            "export function createUser(\n  name: string,\n  permissions: Permissions,\n): Promise<User> {\n  throw new Error();\n}\n",
+            "permissions: Permissions",
+        ),
+        (
+            Lang::Python,
+            "def create_user(\n    name: str,\n    permissions: Permissions,\n) -> User:\n    raise NotImplementedError\n",
+            "permissions: Permissions",
+        ),
+        (
+            Lang::Go,
+            "func CreateUser(\n    name string,\n    permissions Permissions,\n) (User, error) {\n    panic(\"todo\")\n}\n",
+            "permissions Permissions",
+        ),
+    ];
+    for (lang, src, expected) in cases {
+        let rendered = skeleton(src, lang).unwrap().rendered;
+        assert!(rendered.contains(expected), "{lang:?}:\n{rendered}");
+        assert_fully_advertised(src, lang);
+    }
+}

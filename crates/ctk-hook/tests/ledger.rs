@@ -73,6 +73,35 @@ fn read_of_session_edited_file_is_never_compressed() {
 }
 
 #[test]
+fn ledger_directory_ignores_itself() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ledger = Ledger::open(&dir.path().join(".cubtoken"), "gitignore");
+    ledger.note_edit("/repo/src/main.rs");
+    let ignore = dir.path().join(".cubtoken/.gitignore");
+    assert_eq!(std::fs::read_to_string(ignore).unwrap(), "*\n");
+}
+
+#[test]
+fn notebook_edit_protects_notebook_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path().to_str().unwrap().to_string();
+    let cfg = Config::default();
+    let path = "/repo/notebooks/analysis.ipynb";
+
+    let edit = serde_json::json!({
+        "tool_name": "NotebookEdit",
+        "session_id": "notebook-e2e",
+        "cwd": cwd,
+        "tool_input": {"notebook_path": path, "new_source": "print('updated')"},
+        "tool_response": {}
+    });
+    assert!(run_hook(&edit.to_string(), &cfg).is_none());
+
+    let ledger = Ledger::open(&dir.path().join(".cubtoken"), "notebook-e2e");
+    assert!(ledger.is_protected(path));
+}
+
+#[test]
 fn savings_are_recorded_by_run_hook() {
     let dir = tempfile::tempdir().unwrap();
     let cwd = dir.path().to_str().unwrap().to_string();
@@ -124,7 +153,9 @@ fn refetch_count_survives_a_fresh_ledger_handle() {
     let mut l = Ledger::open(dir.path(), "s");
     l.note_saving("Read", Some("/a.rs"), 100, 10);
     assert!(l.was_compressed("/a.rs"));
-    l.note_refetch("/a.rs");
+    l.note_refetch("/a.rs", 42, 7);
     assert_eq!(Ledger::open(dir.path(), "s").refetches(), 1);
+    assert_eq!(Ledger::open(dir.path(), "s").refetch_tokens(), 42);
+    assert_eq!(Ledger::open(dir.path(), "s").refetch_duration_ms(), 7);
     assert!(Ledger::open(dir.path(), "s").was_compressed("/a.rs"));
 }

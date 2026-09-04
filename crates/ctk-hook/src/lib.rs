@@ -21,7 +21,7 @@ pub fn run_hook(stdin: &str, cfg: &Config) -> Option<String> {
 /// parse failure or absent config falls back to defaults / pass-through.
 pub fn run_hook_auto(stdin: &str) -> Option<String> {
     let payload: HookPayload = serde_json::from_str(stdin).ok()?;
-    let cfg = Config::load_for(std::path::Path::new(&payload.cwd));
+    let cfg = Config::try_load_for(std::path::Path::new(&payload.cwd)).ok()?;
     let updated = dispatch(&payload, &cfg)?;
     serde_json::to_string(&HookOutput::updated(updated)).ok()
 }
@@ -29,7 +29,8 @@ pub fn run_hook_auto(stdin: &str) -> Option<String> {
 const EDIT_TOOLS: &[&str] = &["Edit", "Write", "NotebookEdit"];
 
 fn ledger_for(payload: &HookPayload) -> Ledger {
-    let dir = std::path::Path::new(&payload.cwd).join(".cubtoken");
+    let dir =
+        ctk_compress::config::project_root(std::path::Path::new(&payload.cwd)).join(".cubtoken");
     Ledger::open(&dir, &payload.session_id)
 }
 
@@ -39,7 +40,12 @@ fn ledger_for(payload: &HookPayload) -> Ledger {
 fn dispatch(payload: &HookPayload, cfg: &Config) -> Option<serde_json::Value> {
     if EDIT_TOOLS.contains(&payload.tool_name.as_str()) {
         // edit protection always on: a session-edited file is never compressed
-        if let Some(path) = payload.tool_input.get("file_path").and_then(|v| v.as_str()) {
+        let path_key = if payload.tool_name == "NotebookEdit" {
+            "notebook_path"
+        } else {
+            "file_path"
+        };
+        if let Some(path) = payload.tool_input.get(path_key).and_then(|v| v.as_str()) {
             ledger_for(payload).note_edit(path);
         }
         return None;
@@ -61,7 +67,11 @@ fn dispatch(payload: &HookPayload, cfg: &Config) -> Option<serde_json::Value> {
                 || payload.tool_input.get("limit").is_some()
             {
                 if cfg.stats.ledger && ledger.was_compressed(path) {
-                    ledger.note_refetch(path);
+                    ledger.note_refetch(
+                        path,
+                        ctk_compress::read::response_tokens(&payload.tool_response),
+                        payload.duration_ms.unwrap_or(0),
+                    );
                 }
                 return None;
             }
