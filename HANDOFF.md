@@ -84,6 +84,22 @@ Baseline from ~3 months of real dogfooding (9 sessions across 3 repos), measured
 
 88% savings when it fires — but it fired 13 times in three months, and Grep/Glob/Bash have never fired once. The same ledgers hold **52 Edit records**, so edit-protection suppressed far more Reads than compression captured. Collect refetch data before widening thresholds or adding languages.
 
+## Data-type bodies kept (2026-09-04)
+
+Skeletons elided the one thing the model reads a file *for*. `pub struct Config { … [L3-L6] }` hid four field lines to save four lines — negative value, and a guaranteed refetch. Same for enum variants, TS interface members and Python dataclass fields. Go was already correct (its `type_declaration` has no `body` field to elide), so three of four languages disagreed with the fourth.
+
+| Change | Where |
+|---|---|
+| `verbatim_body_kinds` — struct/enum/union (Rust), interface/enum (TS) render their body whole | `ctk-sitter/src/lib.rs` |
+| `depth == 0` → `depth < MAX_CONTAINER_DEPTH` (3): a `mod`/`namespace`/nested class no longer swallows every member into one marker | `emit_decl` |
+| Bare `namespace N {}` arrives wrapped in an `expression_statement` in the TSX grammar (only `export namespace` is an `export_statement`) — `unwrap_decl` now unwraps that one shape | `unwrap_decl` |
+| Python `expression_statement` added to `decl_kinds` so dataclass/Pydantic/Django field assignments survive | `decl_kinds` |
+| `MAX_VERBATIM_BODY_LINES` (40) caps both verbatim bodies and bodyless decls, so a 300-variant enum or a 200-line lookup table still elides and still advertises its range | `emit_decl` |
+
+Measured: `tests/fixtures/read_large.json` is byte-identical before and after (26,118 → 8,105 chars, 69% saved) — that fixture is all functions, so the change costs nothing where structs are absent and only pays where they are present.
+
+Test-fixture gotcha: `crates/ctk-sitter/tests/corpus/sample.rs` is ~3.5KB, and with struct bodies kept the fixed ~600-char banner pushes it past the 30% savings guard — `compress_read` correctly declines. Three `read.rs` unit tests now build their input with `big_sample()` (`SAMPLE.repeat(4)`) rather than loosening the guard.
+
 ## Deliberately not done
 
 - **Loosening edit-protection.** Tempting (52 edits vs 13 compressions) but it directly weakens the project's #1 stated hazard mitigation. Needs refetch + failed-Edit data first, not a guess.

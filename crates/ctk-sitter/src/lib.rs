@@ -97,8 +97,14 @@ fn decl_kinds(lang: Lang) -> &'static [&'static str] {
             "public_field_definition",
             "lexical_declaration",
             "variable_declaration",
+            "internal_module",
+            "module",
         ],
-        Lang::Python => &["function_definition", "class_definition"],
+        Lang::Python => &[
+            "function_definition",
+            "class_definition",
+            "expression_statement",
+        ],
         Lang::Go => &[
             "function_declaration",
             "method_declaration",
@@ -122,8 +128,30 @@ fn import_kinds(lang: Lang) -> &'static [&'static str] {
 fn container_kinds(lang: Lang) -> &'static [&'static str] {
     match lang {
         Lang::Rust => &["impl_item", "trait_item", "mod_item"],
-        Lang::TypeScript => &["class_declaration", "abstract_class_declaration"],
+        Lang::TypeScript => &[
+            "class_declaration",
+            "abstract_class_declaration",
+            "internal_module",
+            "module",
+        ],
         Lang::Python => &["class_definition"],
+        Lang::Go => &[],
+    }
+}
+
+/// Declarations whose body *is* the signature: a struct's fields, an enum's
+/// variants, an interface's members. Eliding these is negative value — the
+/// shape is exactly what the reader came for, and hiding four field lines to
+/// save four lines just buys a refetch. Rendered verbatim up to
+/// [`MAX_VERBATIM_BODY_LINES`], then elided like any other body.
+fn verbatim_body_kinds(lang: Lang) -> &'static [&'static str] {
+    match lang {
+        Lang::Rust => &["struct_item", "enum_item", "union_item"],
+        Lang::TypeScript => &["interface_declaration", "enum_declaration"],
+        // Python class bodies hold methods too, so they keep recursing;
+        // field assignments are picked up via `decl_kinds`.
+        Lang::Python => &[],
+        // Go type declarations already render whole: no `body` field to elide.
         Lang::Go => &[],
     }
 }
@@ -137,6 +165,22 @@ fn unwrap_decl<'t>(node: Node<'t>) -> Node<'t> {
                 .named_children(&mut cursor)
                 .find(|c| !c.kind().contains("comment") && c.kind() != "decorator");
             inner.unwrap_or(node)
+        }
+        // A bare `namespace N {}` arrives wrapped in an `expression_statement`
+        // (only the `export`ed form is an `export_statement`). Unwrap just that
+        // case — Python relies on `expression_statement` staying intact.
+        "expression_statement" => {
+            let mut cursor = node.walk();
+            let mut children = node.named_children(&mut cursor);
+            match children.next() {
+                Some(inner)
+                    if matches!(inner.kind(), "internal_module" | "module")
+                        && children.next().is_none() =>
+                {
+                    inner
+                }
+                _ => node,
+            }
         }
         _ => node,
     }
@@ -152,6 +196,12 @@ fn body_node<'t>(node: Node<'t>) -> Option<Node<'t>> {
 }
 
 const MAX_IMPORTS_SHOWN: usize = 10;
+/// Nesting levels a container recurses through before collapsing its body.
+/// Covers `mod`/`namespace` wrapping an `impl`/`class` wrapping members.
+const MAX_CONTAINER_DEPTH: usize = 3;
+/// A struct/enum/interface body longer than this is elided like anything else
+/// — a 300-variant enum is not a signature.
+const MAX_VERBATIM_BODY_LINES: usize = 40;
 const GUTTER: &str = "     ";
 
 struct Builder<'a> {
@@ -234,14 +284,26 @@ impl<'a> Builder<'a> {
                     body.start_position().row
                 }
             })
-            .unwrap_or_else(|| decl.end_position().row)
+            // A bodyless decl (a const, a module-level assignment) is its own
+            // signature — but a 300-line lookup table is not. Cap it so the
+            // overflow is elided and advertised like any other body.
+            .unwrap_or_else(|| decl.end_position().row.min(sig + MAX_VERBATIM_BODY_LINES))
             .min(end);
         for row in outer.start_position().row..=signature_end {
             self.emit_verbatim(row);
         }
         self.decls += 1;
 
-        if depth == 0 && container_kinds(self.lang).contains(&decl.kind()) {
+        if end > signature_end
+            && end - signature_end <= MAX_VERBATIM_BODY_LINES
+            && verbatim_body_kinds(self.lang).contains(&decl.kind())
+        {
+            for row in signature_end + 1..=end {
+                self.emit_verbatim(row);
+            }
+            return;
+        }
+        if depth < MAX_CONTAINER_DEPTH && container_kinds(self.lang).contains(&decl.kind()) {
             if let Some(body) = decl.child_by_field_name("body") {
                 self.process_children(body, depth + 1);
                 return;

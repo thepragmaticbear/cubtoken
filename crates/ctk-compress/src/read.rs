@@ -125,6 +125,14 @@ mod tests {
 
     const SAMPLE: &str = include_str!("../../ctk-sitter/tests/corpus/sample.rs");
 
+    /// The corpus file alone is ~3.5KB — small enough that the fixed-size
+    /// banner eats the whole 30% savings margin and `compress_read` correctly
+    /// declines. These tests are about skeleton *content*, so give them an
+    /// input the size of a file that would really cross the threshold.
+    fn big_sample() -> String {
+        SAMPLE.repeat(4)
+    }
+
     fn low_threshold() -> Config {
         Config::load_from(
             None,
@@ -145,10 +153,11 @@ mod tests {
 
     #[test]
     fn skeleton_lines_are_verbatim_source_lines() {
-        let (input, response) = payload("/repo/src/sample.rs", SAMPLE);
+        let src = big_sample();
+        let (input, response) = payload("/repo/src/sample.rs", &src);
         let out = compress_read(&input, &response, &low_threshold()).unwrap();
         let compressed = out.updated_response["file"]["content"].as_str().unwrap();
-        let source_lines: Vec<&str> = SAMPLE.lines().collect();
+        let source_lines: Vec<&str> = src.lines().collect();
         let mut checked = 0;
         for line in compressed.lines() {
             // gutter format: right-aligned number, two spaces, verbatim text
@@ -167,7 +176,8 @@ mod tests {
 
     #[test]
     fn exactly_one_banner() {
-        let (input, response) = payload("/repo/src/sample.rs", SAMPLE);
+        let src = big_sample();
+        let (input, response) = payload("/repo/src/sample.rs", &src);
         let out = compress_read(&input, &response, &low_threshold()).unwrap();
         let compressed = out.updated_response["file"]["content"].as_str().unwrap();
         assert_eq!(compressed.matches("[cubtoken:").count(), 1);
@@ -187,7 +197,8 @@ mod tests {
 
     #[test]
     fn tokens_accounted() {
-        let (input, response) = payload("/repo/src/sample.rs", SAMPLE);
+        let src = big_sample();
+        let (input, response) = payload("/repo/src/sample.rs", &src);
         let out = compress_read(&input, &response, &low_threshold()).unwrap();
         assert!(out.tokens_out < out.tokens_in);
         assert!(out.tokens_in > 100);
