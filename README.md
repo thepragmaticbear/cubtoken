@@ -42,7 +42,7 @@ cubtoken installs as a **PostToolUse hook**. The tool runs normally (a local fil
    ctk doctor
    ```
 
-   Expect `PASS  PostToolUse hook installed` and `PASS  .cubtoken/ writable`. The `INFO  rtk …` line reports whether rtk is on your PATH — if it is, leave `bash.enabled = false` and let rtk handle Bash. The exit code is non-zero if any check fails.
+   `doctor` searches `.claude/settings.json`, `.claude/settings.local.json` and `~/.claude/settings.json`, prints where it found the hook, and checks that the binary path in that entry still exists — `init` embeds an absolute path, so a `cargo clean` or a moved binary otherwise breaks every hook invocation silently. The `INFO  rtk …` line reports whether rtk is on your PATH — if it is, leave `bash.enabled = false` and let rtk handle Bash. The exit code is non-zero if any check fails.
 
 5. **Work normally.** Nothing changes in how you use Claude Code. When the model runs `Read`, `Grep`, or `Glob` and the output is large, the hook swaps in the compressed view before it reaches the context window. Targeted `Read(offset, limit)` calls and files you have edited this session are left untouched.
 
@@ -54,14 +54,17 @@ cubtoken installs as a **PostToolUse hook**. The tool runs normally (a local fil
 
    Prints a per-tool table (`tokens in / out / saved / saved%`) plus a lifetime `TOTAL`, aggregated across every session ledger in `.cubtoken/`. `no savings recorded yet` means no compressible tool calls have run in a post-`init` session — re-check step 3.
 
+   Counts are estimates (~3.5 chars/token), not tokenizer output. The last line reports **follow-up `Read(offset/limit)` calls into compressed files** — the cost side of compression, where the model pays a round trip to buy back what a skeleton elided. Savings are only real net of that number; if it climbs, raise `read.threshold_tokens` so fewer files get skeletonized.
+
 7. **Tune (optional).** Edit `.cubtoken.toml` to compress more or less — raise `read.threshold_tokens`, add globs to `read.never_compress`, or set `bash.enabled = true` if you do not run rtk. See [Configuration](#configuration-cubtokentoml-overlaid-on-configcubtokenconfigtoml) below. Config is re-read on every tool call, so edits apply to the next one — no restart needed (only installing the hook with `ctk init` requires a restart).
 
 ## Design invariants
 
 1. **Fail open** — any internal error means the original output passes through untouched. The hook never breaks a session.
-2. **Escape hatch** — every compressed view names the exact tool call (`Read(offset, limit)`, `Grep(path=…)`, `Glob(pattern=…)`) that retrieves the elided content.
-3. **Verbatim lines** — every source line shown in a skeleton is the exact file text at the stated line number, so quoted edits stay valid. Targeted `Read(offset/limit)` calls are never compressed, and a file the model has edited this session is never compressed again (Edit-protection ledger).
-4. **Deterministic** — same input, same output. No LLM calls, no network, fully local.
+2. **Escape hatch** — every compressed view names the exact tool call (`Read(offset, limit)`, `Grep(path=…)`, `Glob(pattern=…)`) that retrieves the elided content, and *every* elided line falls inside an advertised `[La-Lb]` range. Nothing is dropped silently — attributes, decorators and closing braces included.
+3. **Verbatim lines** — every source line shown in a skeleton is the exact file text at the stated line number, so quoted edits stay valid. Targeted `Read(offset/limit)` calls are never compressed, and a file the model has edited this session is never compressed again (Edit-protection ledger). The Read tool renders its own sequential numbering around the substituted block, so the banner tells the model to read the *inner* gutter for real line numbers.
+4. **Deterministic** — same input, same output. No LLM calls, no network, fully local. Glob keeps the host's newest-first path ordering rather than sorting.
+5. **Never pay to compress** — Read, Grep, Glob and Bash each pass through unless the compressed form is at least 30% smaller. A wide, flat directory tree folds to roughly itself, so it is left alone.
 
 ## Configuration (`.cubtoken.toml`, overlaid on `~/.config/cubtoken/config.toml`)
 
@@ -79,7 +82,7 @@ cubtoken installs as a **PostToolUse hook**. The tool runs normally (a local fil
 
 Config is layered: built-in defaults, then the global `~/.config/cubtoken/config.toml`, then the project `.cubtoken.toml` in the directory Claude Code is running in (project wins on conflicts). The hook reads these per tool call against the session's working directory, so a single global `ctk init --global` install still honors each project's own `.cubtoken.toml` — drop one in any repo to tune it there.
 
-Languages with skeleton support: Rust, TypeScript/TSX/JS, Python, Go (tree-sitter). Other files fall back to head+tail elision with line numbers.
+Languages with skeleton support: Rust, TypeScript/TSX/JS, Python, Go (tree-sitter). Skeletons keep the context attached to a signature — Rust attributes (`#[derive]`, `#[cfg]`), Python decorators, doc comments — alongside the declaration itself. Other files fall back to head+tail elision with line numbers, which is truncation rather than summary; consider adding those extensions to `read.never_compress` if the head/tail view is not useful for them.
 
 ## Development
 

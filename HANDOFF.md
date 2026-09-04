@@ -1,7 +1,7 @@
 # cubtoken — Running Handoff Doc
 
 > **Purpose:** If this session dies (rate limit, crash), a fresh session resumes from this file.
-> **Last updated:** 2026-06-15 — fixed a config-loading bug: the hook ran with `Config::default()`, so `.cubtoken.toml` and the global file were inert at runtime. Now loads layered config from the payload `cwd` (see decision log). (2026-06-13: renamed smalltoke→cubtoken, binary stk→ctk. **ALL 13 MVP TASKS COMPLETE.**)
+> **Last updated:** 2026-09-04 — post-MVP review pass: merged the config fix, fixed four correctness bugs found by probing the live hook, added refetch instrumentation. Gate green (66 tests).
 >
 > **Note:** work now happens in `~/repos/cubtoken`; a `~/repos/smalltoke` copy still exists on disk. The memory dir is still keyed off the `smalltoke` path, so it's unaffected. **Gotcha:** the `cubtoken` checkout inherited `smalltoke`'s `target/`, which baked the old manifest path into `insta`, so `ctk-sitter`'s `rust_skeleton_snapshot` fails in a full `cargo test` (passes in isolation) with a `/Users/brandon/repos/smalltoke/...` path in the error. Fix: `cargo clean` (or `cargo clean -p ctk-sitter`).
 
@@ -47,6 +47,8 @@
 | 2026-06-12 | v1 never emits `permissionDecision` | Security scope cut from original proposal |
 | 2026-06-12 | tree-sitter deps deferred from Task 1 to Task 4 | Resolve grammar/core version pins once, when actually implementing skeletons; keeps scaffold build trivially green |
 | 2026-06-12 | Work directly on `main` | Greenfield, solo repo |
+| 2026-09-04 | Elision markers coalesce rather than stack | A run of closing braces produced `… [L37-L38]` / `… [L39-L40]` back to back; widening one marker is honest and quieter |
+| 2026-09-04 | Glob preserves input order, does not sort | The recorded fixture is `big.rs, helper_1…helper_30` — creation order. Glob returns newest-first and that is a signal worth keeping |
 | 2026-06-13 | Renamed smalltoke→cubtoken, binary stk→ctk, crates ctk-* | User rename request; `ctk` keeps the abbreviation coherent (cub-to-ken). Directory left as `smalltoke` to avoid disrupting the live session/memory path. Fixtures' `stk-capture` sample paths left untouched (opaque recorded data). |
 | 2026-06-15 | Hook loads layered config from the payload `cwd` (`run_hook_auto` + `Config::load_for`) | `main.rs` called `Config::default()`, so `.cubtoken.toml` and the global file were ignored at runtime — every documented setting was inert (Task 5 built the loader but nothing called it). Reading from `payload.cwd` (not process cwd) makes a global hook install honor each project's config and matches where the ledger is written. `run_hook(cfg)` kept for test injection. |
 
@@ -54,6 +56,39 @@
 
 - ~~Task 2 fixture capture~~ **RESOLVED:** headless `claude -p` (haiku, temp project `/tmp/ctk-capture`, recorder hook pre-installed in its settings) captured all five payloads. This headless-capture trick is reusable for any future schema question.
 - ~~Task 6 validation decision point~~ **RESOLVED:** live headless probe — agent read big.rs through the installed hook and reported COMPRESSED. `updatedToolOutput` substitution works for Read.
+
+## Review findings actioned (2026-09-04)
+
+Found by running the installed hook against real payloads, not by reading code.
+
+| Bug | Symptom | Fix |
+|---|---|---|
+| Double line-number gutter | The Read tool renders its own sequential numbering around our substituted block, so the model saw two conflicting numbers per row | Banner names the outer gutter and tells the model to use the inner one |
+| Python decorated defs | `@app.route(...)` shown, `def handler(req):` never shown — the signature skeleton had no signature | `emit_decl` shows every row from wrapper start through the declaration's own start row |
+| Rust attributes dropped | `#[derive]`, `#[serde]`, `#[cfg(target_os)]` vanished with no elision marker | `emit_prefix_lines` accepts `attribute_item` alongside comments |
+| Unadvertised elisions | Container bodies, closing braces and trailing content disappeared with no `[La-Lb]` range — a direct invariant-2 violation | `Builder.covered` tracks the high-water row; `emit_gap` advertises any non-blank skip. Adjacent markers coalesce so closing-brace runs don't stack |
+| Glob expanded its input | 80 files in 80 dirs: 1110 chars → 1201 chars, substituted anyway, ledger recorded `in:318 out:344` | 30% guard (matching read/grep/bash), plus input ordering preserved and a truthful `numFiles` |
+
+Also: `doctor` now searches `settings.local.json` and verifies the embedded binary path still exists; the grep duplicate-fold note carries an escape hatch; `ctk stats` labels its numbers as estimates.
+
+**New instrumentation — read this before tuning anything.** The ledger now records a `refetch` whenever the model issues a targeted `Read(offset/limit)` into a file compressed earlier in the same session. `ctk stats` reports the count. That is the cost side of compression: gross savings were always measurable, net savings were not.
+
+Baseline from ~3 months of real dogfooding (9 sessions across 3 repos), measured during this review:
+
+| tool | firings | est. tokens in | est. tokens out |
+|---|---|---|---|
+| Read | 13 | 79,976 | 9,897 |
+| Grep | 0 | — | — |
+| Glob | 0 | — | — |
+| Bash | 0 | — | — |
+
+88% savings when it fires — but it fired 13 times in three months, and Grep/Glob/Bash have never fired once. The same ledgers hold **52 Edit records**, so edit-protection suppressed far more Reads than compression captured. Collect refetch data before widening thresholds or adding languages.
+
+## Deliberately not done
+
+- **Loosening edit-protection.** Tempting (52 edits vs 13 compressions) but it directly weakens the project's #1 stated hazard mitigation. Needs refetch + failed-Edit data first, not a guess.
+- **Grep/Glob threshold tuning.** They have never fired. Log near-misses for a week before picking new numbers; changing them blind trades one unmeasured setting for another.
+- **Structural fallback for JSON/YAML/lockfiles.** Head+tail is truncation, not summary (`Cargo.lock` elided 93% and left an arbitrary window). Real feature work, and worth more than adding Java/C — but it is a feature, not a fix.
 
 ## Where to go next (post-MVP)
 
