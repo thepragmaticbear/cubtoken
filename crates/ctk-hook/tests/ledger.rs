@@ -82,6 +82,30 @@ fn ledger_directory_ignores_itself() {
 }
 
 #[test]
+fn session_id_cannot_escape_the_ledger_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().join(".cubtoken");
+    let mut ledger = Ledger::open(&data, "sub/../../escaped");
+    ledger.note_edit("/repo/src/main.rs");
+
+    assert!(!dir.path().join("escaped.jsonl").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn ledger_does_not_follow_a_data_directory_symlink() {
+    use std::os::unix::fs::symlink;
+
+    let dir = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let data = dir.path().join(".cubtoken");
+    symlink(outside.path(), &data).unwrap();
+
+    Ledger::open(&data, "session").note_edit("/repo/src/main.rs");
+    assert!(!outside.path().join("session-session.jsonl").exists());
+}
+
+#[test]
 fn notebook_edit_protects_notebook_path() {
     let dir = tempfile::tempdir().unwrap();
     let cwd = dir.path().to_str().unwrap().to_string();

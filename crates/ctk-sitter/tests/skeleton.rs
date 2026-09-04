@@ -179,3 +179,138 @@ fn multiline_signatures_are_preserved_across_languages() {
         assert_fully_advertised(src, lang);
     }
 }
+
+// A data type's body *is* its signature: hiding struct fields, enum variants
+// or interface members costs the model a refetch to buy back what it came for.
+
+#[test]
+fn rust_struct_and_enum_bodies_are_kept() {
+    let src = "pub struct Config {\n    pub name: String,\n    pub port: u16,\n}\n\npub enum Mode {\n    Fast,\n    Custom(u32),\n}\n";
+    let out = skeleton(src, Lang::Rust).unwrap().rendered;
+    for want in ["pub name: String", "pub port: u16", "Fast,", "Custom(u32)"] {
+        assert!(out.contains(want), "{want:?} elided from:\n{out}");
+    }
+}
+
+#[test]
+fn typescript_interface_members_are_kept() {
+    let src = "export interface Props {\n  id: string;\n  title: string;\n}\n";
+    let out = skeleton(src, Lang::TypeScript).unwrap().rendered;
+    assert!(out.contains("id: string"), "elided from:\n{out}");
+    assert!(out.contains("title: string"), "elided from:\n{out}");
+}
+
+#[test]
+fn python_class_fields_are_kept() {
+    let src = "@dataclass\nclass User:\n    id: int\n    name: str\n\n    def greet(self):\n        return \"hi\"\n";
+    let out = skeleton(src, Lang::Python).unwrap().rendered;
+    assert!(out.contains("id: int"), "elided from:\n{out}");
+    assert!(out.contains("name: str"), "elided from:\n{out}");
+    assert!(out.contains("def greet"), "signature lost from:\n{out}");
+}
+
+#[test]
+fn oversized_data_bodies_still_elide() {
+    let mut src = String::from("pub enum Big {\n");
+    for i in 0..60 {
+        src.push_str(&format!("    V{i},\n"));
+    }
+    src.push_str("}\n");
+    let out = skeleton(&src, Lang::Rust).unwrap().rendered;
+    assert!(
+        !out.contains("V59"),
+        "300-variant enum rendered whole:\n{out}"
+    );
+    assert!(out.contains("[L"), "elision not advertised:\n{out}");
+}
+
+#[test]
+fn oversized_bodyless_decls_still_elide() {
+    let mut src = String::from("TABLE = {\n");
+    for i in 0..60 {
+        src.push_str(&format!("    \"k{i}\": {i},\n"));
+    }
+    src.push_str("}\n");
+    let out = skeleton(&src, Lang::Python).unwrap().rendered;
+    assert!(
+        !out.contains("\"k59\""),
+        "lookup table rendered whole:\n{out}"
+    );
+    assert!(out.contains("[L"), "elision not advertised:\n{out}");
+}
+
+// Nested containers: a `mod`/`namespace` wrapper used to swallow every
+// declaration inside it into a single elision marker.
+
+#[test]
+fn methods_inside_a_module_survive() {
+    let src = "mod inner {\n    impl Thing {\n        pub fn alpha(&self) -> u8 { 1 }\n        pub fn beta(&self) -> u8 { 2 }\n    }\n}\n";
+    let out = skeleton(src, Lang::Rust).unwrap().rendered;
+    assert!(out.contains("fn alpha"), "elided from:\n{out}");
+    assert!(out.contains("fn beta"), "elided from:\n{out}");
+}
+
+#[test]
+fn typescript_namespace_members_survive() {
+    let src =
+        "namespace N {\n  export class C {\n    a() { return 1; }\n    b() { return 2; }\n  }\n}\n";
+    let out = skeleton(src, Lang::TypeScript).unwrap().rendered;
+    assert!(out.contains("namespace N"), "elided from:\n{out}");
+    assert!(out.contains("a()"), "elided from:\n{out}");
+    assert!(out.contains("b()"), "elided from:\n{out}");
+}
+
+#[test]
+fn nested_python_class_methods_survive() {
+    let src = "class Outer:\n    class Inner:\n        def a(self):\n            pass\n";
+    let out = skeleton(src, Lang::Python).unwrap().rendered;
+    assert!(out.contains("class Inner"), "elided from:\n{out}");
+    assert!(out.contains("def a"), "elided from:\n{out}");
+}
+
+// `body_node` used to find *any* nested `body` field, so a data literal
+// holding a lambda/arrow/closure reported that inner body as the end of the
+// statement's signature and truncated it behind a misleading marker.
+
+#[test]
+fn data_literals_holding_lambdas_are_not_truncated() {
+    let src = "HANDLERS = {\n    \"a\": lambda x: fn(x),\n    \"b\": lambda x: g(x),\n}\n";
+    let out = skeleton(src, Lang::Python).unwrap().rendered;
+    assert!(out.contains("lambda x: g(x)"), "truncated:\n{out}");
+    assert!(!out.contains("[L"), "spurious elision marker:\n{out}");
+}
+
+#[test]
+fn comprehensions_are_not_truncated() {
+    let src = "SQUARES = [\n    n * n\n    for n in range(10)\n]\n";
+    let out = skeleton(src, Lang::Python).unwrap().rendered;
+    assert!(out.contains("for n in range(10)"), "truncated:\n{out}");
+}
+
+#[test]
+fn typescript_object_of_arrow_fns_is_not_truncated() {
+    let src =
+        "export const handlers = {\n  a: (x: number) => fn(x),\n  b: (x: number) => g(x),\n};\n";
+    let out = skeleton(src, Lang::TypeScript).unwrap().rendered;
+    assert!(out.contains("b: (x: number) => g(x)"), "truncated:\n{out}");
+}
+
+#[test]
+fn rust_static_holding_a_closure_is_not_truncated() {
+    let src = "static R: Lazy<Map> = Lazy::new(|| {\n    let mut m = Map::new();\n    m.insert(\"a\", 1);\n    m\n});\n";
+    let out = skeleton(src, Lang::Rust).unwrap().rendered;
+    assert!(out.contains("m.insert(\"a\", 1)"), "truncated:\n{out}");
+}
+
+#[test]
+fn const_arrow_function_body_still_elides() {
+    // the case the value-chain descent exists for: the value *is* the function
+    let src = "export const handler = async (req: Request) => {\n  const a = 1;\n  const b = 2;\n  return a + b;\n};\n";
+    let out = skeleton(src, Lang::TypeScript).unwrap().rendered;
+    assert!(
+        out.contains("export const handler"),
+        "signature lost:\n{out}"
+    );
+    assert!(!out.contains("const a = 1"), "body not elided:\n{out}");
+    assert!(out.contains("[L"), "elision not advertised:\n{out}");
+}

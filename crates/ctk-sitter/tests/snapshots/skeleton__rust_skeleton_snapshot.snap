@@ -1,6 +1,5 @@
 ---
 source: crates/ctk-sitter/tests/skeleton.rs
-assertion_line: 7
 expression: sk.rendered
 ---
     1  use std::collections::HashMap;
@@ -9,10 +8,18 @@ expression: sk.rendered
        … +9 more imports [L4-L12]
    14  /// Kind of widget understood by the registry.
    15  pub enum WidgetKind {
-       … [L16-L19]
+   16      Plain,
+   17      Fancy { trim: String },
+   18      Composite(Vec<WidgetKind>),
+   19  }
    21  /// A widget tracked by the [`Registry`].
    22  pub struct Widget {
-       … [L23-L28]
+   23      pub id: u64,
+   24      pub name: String,
+   25      pub kind: WidgetKind,
+   26      created_order: usize,
+   27      tags: HashSet<String>,
+   28  }
    30  /// Anything that can be persisted to the backing store.
    31  pub trait Persist {
    32      /// Serialize into the store's wire format.
@@ -22,7 +29,10 @@ expression: sk.rendered
        … [L37-L40]
    41  /// Central widget registry; the main entry point of this module.
    42  pub struct Registry {
-       … [L43-L46]
+   43      widgets: HashMap<u64, Widget>,
+   44      by_name: HashMap<String, u64>,
+   45      next_order: usize,
+   46  }
    48  impl Registry {
    49      /// Create an empty registry.
    50      pub fn new() -> Self {

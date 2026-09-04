@@ -38,10 +38,15 @@ fn installed_from_build_dir() -> Option<String> {
 
 pub fn settings_path(global: bool) -> Result<PathBuf, String> {
     if global {
-        let home = std::env::var_os("HOME").ok_or("HOME not set")?;
+        if let Some(config_dir) = std::env::var_os("CLAUDE_CONFIG_DIR") {
+            return Ok(PathBuf::from(config_dir).join("settings.json"));
+        }
+        let home = std::env::var_os("HOME")
+            .or_else(|| std::env::var_os("USERPROFILE"))
+            .ok_or("HOME/USERPROFILE not set")?;
         Ok(PathBuf::from(home).join(".claude/settings.json"))
     } else {
-        Ok(PathBuf::from(".claude/settings.json"))
+        Ok(PathBuf::from(".claude/settings.local.json"))
     }
 }
 
@@ -57,10 +62,15 @@ pub fn hook_command() -> String {
 }
 
 fn install_hook(settings_path: &Path) -> Result<(), String> {
+    reject_symlink(settings_path)?;
+    if let Some(parent) = settings_path.parent() {
+        reject_symlink(parent)?;
+    }
     let mut settings: serde_json::Value = match std::fs::read_to_string(settings_path) {
         Ok(content) => serde_json::from_str(&content)
             .map_err(|e| format!("{} is not valid JSON: {e}", settings_path.display()))?,
-        Err(_) => serde_json::json!({}),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => serde_json::json!({}),
+        Err(error) => return Err(format!("cannot read {}: {error}", settings_path.display())),
     };
 
     if !settings.is_object() {
@@ -130,6 +140,8 @@ fn is_ctk_executable(exe: &str) -> bool {
 
 fn atomic_write(path: &Path, content: &str) -> Result<(), String> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    reject_symlink(parent)?;
+    reject_symlink(path)?;
     let name = path
         .file_name()
         .and_then(OsStr::to_str)
@@ -153,6 +165,18 @@ fn atomic_write(path: &Path, content: &str) -> Result<(), String> {
         let _ = std::fs::remove_file(&temp);
     }
     result
+}
+
+fn reject_symlink(path: &Path) -> Result<(), String> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(format!(
+            "refusing to write through symlink: {}",
+            path.display()
+        )),
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("cannot inspect {}: {error}", path.display())),
+    }
 }
 
 #[cfg(not(windows))]
@@ -180,9 +204,6 @@ fn replace_file(temp: &Path, destination: &Path) -> Result<(), String> {
 }
 
 fn write_starter_config(path: &Path) {
-    if path.exists() {
-        return;
-    }
     let starter = "\
 # cubtoken project config — see https://github.com/brandonfla/cubtoken
 [read]
@@ -205,5 +226,11 @@ enabled = false  # set true if you don't use rtk
 [stats]
 ledger = true
 ";
-    let _ = std::fs::write(path, starter);
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+    {
+        let _ = file.write_all(starter.as_bytes());
+    }
 }
