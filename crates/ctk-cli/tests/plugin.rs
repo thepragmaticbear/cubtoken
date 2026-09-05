@@ -4,6 +4,9 @@
 //! `init`'s, and the wrapper losing its fail-open behaviour.
 
 use std::path::{Path, PathBuf};
+// Only the two wrapper tests below run the shell script, and those are
+// unix-only — leaving this ungated fails `-D warnings` on the Windows runner.
+#[cfg(unix)]
 use std::process::{Command, Stdio};
 
 /// Mirrors `init::MATCHER`; `matcher_matches_init` is the guard that they stay
