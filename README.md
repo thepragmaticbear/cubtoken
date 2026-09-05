@@ -28,7 +28,9 @@ cubtoken installs as a **post-tool hook**. The tool runs normally (a local file 
 1. **Get the binary.** Download a prebuilt archive from [Releases](https://github.com/brandonfla/cubtoken/releases) (each release ships `SHA256SUMS` and a build attestation, verifiable with `gh attestation verify`), or build from source:
 
    ```sh
-   cargo install --path crates/ctk-cli   # puts `ctk` on your PATH
+   git clone https://github.com/brandonfla/cubtoken.git
+   cd cubtoken
+   cargo install --locked --path crates/ctk-cli   # puts `ctk` on your PATH
    ```
 
    Install it somewhere permanent. `init` embeds the absolute path of whichever binary you ran it with, so installing the hook straight out of `./target/release` breaks the moment you `cargo clean` — `init` warns when it sees a `target/` path.
@@ -36,10 +38,10 @@ cubtoken installs as a **post-tool hook**. The tool runs normally (a local file 
 2. **Install the hook.** Run inside the project you want to compress:
 
    ```sh
-   ctk init            # writes .claude/settings.json + a starter .cubtoken.toml
+   ctk init            # writes .claude/settings.local.json + a starter .cubtoken.toml
    ```
 
-   The hook matches `Read|Grep|Glob|Bash|Edit|Write|NotebookEdit`. Use `ctk init --global` to install once for every project (`~/.claude/settings.json`); the global install does not write a `.cubtoken.toml`. `init` is idempotent — re-running it just refreshes the hook entry, and an existing `.cubtoken.toml` is never overwritten.
+   The hook matches `Read|Grep|Glob|Bash|Edit|Write|NotebookEdit`. Use `ctk init --global` to install once for every project (`~/.claude/settings.json`, or `$CLAUDE_CONFIG_DIR/settings.json` when set); the global install does not write a `.cubtoken.toml`. `init` is idempotent — re-running it just refreshes the hook entry, and an existing `.cubtoken.toml` is never overwritten.
 
    **Or install the plugin instead.** `plugins/cubtoken/` ships the same hook as a Claude Code plugin, which resolves `ctk` at call time rather than baking in an absolute path — so `cargo clean` or moving the binary can't silently break it:
 
@@ -58,7 +60,7 @@ cubtoken installs as a **post-tool hook**. The tool runs normally (a local file 
    ctk doctor
    ```
 
-   `doctor` searches `.claude/settings.json`, `.claude/settings.local.json` and `~/.claude/settings.json`, prints where it found the hook, and checks that the binary path in that entry still exists — `init` embeds an absolute path, so a `cargo clean` or a moved binary otherwise breaks every hook invocation silently. The `INFO  rtk …` line reports whether rtk is on your PATH — if it is, leave `bash.enabled = false` and let rtk handle Bash. The exit code is non-zero if any check fails.
+   `doctor` searches `.claude/settings.json`, `.claude/settings.local.json`, and the active global settings location, prints where it found the hook, and checks that the binary path in that entry still exists — `init` embeds an absolute path, so a `cargo clean` or a moved binary otherwise breaks every hook invocation silently. The `INFO  rtk …` line reports whether rtk is on your PATH — if it is, leave `bash.enabled = false` and let rtk handle Bash. The exit code is non-zero if any check fails.
 
 5. **Work normally.** Nothing changes in how you use Claude Code. When the model runs `Read`, `Grep`, or `Glob` and the output is large, the hook swaps in the compressed view before it reaches the context window. Targeted `Read(offset, limit)` calls and files you have edited this session are left untouched.
 
@@ -116,9 +118,21 @@ Config is layered: built-in defaults, then the global `~/.config/cubtoken/config
 
 Languages with skeleton support: Rust, TypeScript/TSX/JS, Python, Go (tree-sitter). Skeletons keep the context attached to a signature — Rust attributes (`#[derive]`, `#[cfg]`), Python decorators, doc comments — alongside the declaration itself. Other files fall back to head+tail elision with line numbers, which is truncation rather than summary; consider adding those extensions to `read.never_compress` if the head/tail view is not useful for them.
 
+## Security and privacy
+
+cubtoken is local and deterministic: it makes no network requests and never executes text from tool output. The `.cubtoken/` ledger contains file paths and usage totals, not file contents. `ctk record` is different: it deliberately saves raw hook payloads for debugging, which can contain source code, command output, paths, and secrets. Do not commit recordings.
+
+Tool output and repository content remain untrusted input; compression is not a security filter. See [SECURITY.md](SECURITY.md) for the threat model and private vulnerability reporting.
+
+## Uninstall
+
+1. Remove the cubtoken entry from `PostToolUse` in `.claude/settings.local.json` or `~/.claude/settings.json`.
+2. Delete `.cubtoken.toml` and `.cubtoken/` if you do not want to keep configuration or statistics.
+3. Run `cargo uninstall ctk-cli` if you installed from source, or delete the downloaded `ctk` binary.
+
 ## Development
 
-TDD throughout; fixtures in `tests/fixtures/` are real recorded hook payloads (see `ctk record`). Gate: `cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test`. Design docs live in `docs/bearpaws/plans/`.
+TDD throughout; fixtures in `tests/fixtures/` are real recorded hook payloads (see `ctk record`). Gate: `cargo fmt --check && cargo clippy --locked --workspace --all-targets --all-features -- -D warnings && cargo test --locked --workspace --all-features && cargo audit --deny warnings`.
 
 Layout beyond the Rust workspace:
 

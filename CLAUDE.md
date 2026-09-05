@@ -6,14 +6,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `cubtoken` is a single Rust binary (`ctk`) that installs as a Claude Code **PostToolUse hook** and rewrites native tool outputs (`Read`/`Grep`/`Glob`/`Bash`) *before they reach the model*, via the `updatedToolOutput` field. Large file Reads become tree-sitter signature skeletons; Grep folds per file; Glob folds into a directory tree. It targets the gap stream compressors like rtk can't reach — Claude Code's built-in Read/Grep/Glob bypass the Bash tool entirely.
 
-A second host is wired up: **OpenCode**, through `packages/opencode/` (its `tool.execute.after` plugin hook can replace a tool result the same way). Codex CLI and Antigravity cannot host cubtoken — neither one's post-tool hook can replace a tool result at all.
+A second host is wired up: **OpenCode**, through `packages/opencode/` (its `tool.execute.after` receives the object that is then returned to the model, so mutating `output.output` is the `updatedToolOutput` equivalent).
+
+Codex CLI and Antigravity are **blocked, not deferred** — recorded here so it isn't re-researched. Codex's `PostToolUse` returns only `systemMessage` / `continue` / `stopReason`, so it can add text but never replace a result; its shell-first tool inventory is the second problem, not the first. Antigravity's `PostToolUse` receives `stepIdx` + `error` and must print `{}` — it is never told which tool ran. Antigravity's `PreToolUse` can rewrite args via `overwrite`, so clamping `view_file` to a line range is the only lever there.
 
 ## Commands
 
 ```sh
-cargo build --release                 # binary at target/release/ctk
-cargo install --path crates/ctk-cli   # install ctk onto PATH
-cargo test                            # all tests
+cargo build --locked --release        # binary at target/release/ctk
+cargo install --locked --path crates/ctk-cli # install ctk onto PATH
+cargo test --locked --workspace       # all tests
 cargo test -p ctk-compress            # one crate
 cargo test --test record              # one integration test file (crates/ctk-cli/tests/record.rs)
 cargo test verbatim                   # tests matching a name substring
@@ -23,10 +25,10 @@ cargo insta review                    # review/accept snapshot changes (ctk-sitt
 **Verification gate (must pass before claiming done — mirrors CI):**
 
 ```sh
-cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
+cargo fmt --check && cargo clippy --locked --workspace --all-targets --all-features -- -D warnings && cargo test --locked --workspace --all-features && cargo audit --deny warnings
 ```
 
-CI runs this matrix on ubuntu + macos. `clippy -- -D warnings` means warnings are build failures; keep it clean.
+CI runs this matrix on Ubuntu, macOS, and Windows. `clippy -- -D warnings` means warnings are build failures; keep it clean.
 
 Runtime commands of the binary itself: `ctk init [--global]` (install hook + write starter `.cubtoken.toml`), `ctk doctor` (health check), `ctk stats` (read savings from the ledger), `ctk hook` (the hook handler — stdin JSON → stdout decision JSON), `ctk record <path>` (append stdin to a JSONL file, used to capture real fixtures).
 
@@ -48,7 +50,7 @@ Two non-Rust install paths sit beside the crates:
 
 **Ledger** (`<cwd>/.cubtoken/session-<session_id>.jsonl`): append-only JSONL with two record types — `edit` (path protection) and `save` (token savings). Replayed on open. Two jobs: (1) **edit-protection** — a file the model has edited this session is never compressed again (always on, prevents the Edit-correctness hazard); (2) **savings tracking** for `ctk stats` (gated by `stats.ledger`). All ledger I/O is best-effort and degrades silently.
 
-## Invariants (these override convenience — see `docs/bearpaws/plans/2026-06-12-cubtoken-design.md`)
+## Invariants
 
 1. **Fail open** — any error, panic, or unparseable input passes the original output through untouched. Every error path in `run_hook`/`dispatch` returns `None`; the CLI catches panics and exits 0. Never let the hook break a session.
 2. **Escape hatch** — every compressed view names the exact tool call that retrieves the elided content (e.g. `Read(file_path=…, offset=…, limit=…)`, `[La-Lb]` ranges). The call differs per host, so `CUBTOKEN_HARNESS` (`read.rs::HarnessNames`) switches the spelling; the adapter sets it, not the user.
@@ -64,10 +66,8 @@ Two non-Rust install paths sit beside the crates:
 - **Hooks snapshot at session start.** After `ctk init` or reinstalling, the user must restart their Claude Code session for changes to take effect.
 - **OpenCode's read output is shaped differently from Claude Code's.** Claude passes raw source in `/file/content`; OpenCode passes `<path>…</path>\n<type>file</type>\n<content>\n1: line\n…\n\n(note)\n</content>` with the line numbers **inside the string**. `packages/opencode/index.js` strips those prefixes before handing text to `ctk` and re-adds sequential ones afterwards — don't feed numbered text to `ctk-sitter`, it won't parse. Its `parseRead` bails on any unexpected shape rather than guessing, because a wrong guess breaks invariant 3.
 - **Two places know the hook matcher.** `init::MATCHER` and `plugins/cubtoken/hooks/hooks.json`. `crates/ctk-cli/tests/plugin.rs::matcher_matches_init` fails if they drift.
-- **The on-disk directory is still `~/repos/smalltoke`** (project/binary/crates were renamed smalltoke→cubtoken, stk→ctk, but the dir was intentionally left to preserve the session/memory path). Fixture sample paths still mention `stk-capture` — that's opaque recorded data, leave it.
 
 ## Conventions
 
-- **TDD, plan-driven.** Work follows `docs/bearpaws/plans/2026-06-12-cubtoken-mvp.md` (13 tasks, test-first). Write the failing test, then implement. One commit per task/meaningful step, short imperative messages.
-- `HANDOFF.md` is a running resume-from-here doc; keep its "Current state notes" and decision log current when state changes in non-obvious ways.
+- **TDD.** Write the failing test, then implement. One commit per meaningful step, short imperative messages.
 - Tests live both inline (`#[cfg(test)] mod tests`) and as integration tests under each crate's `tests/`. `ctk-sitter` uses `insta` snapshots.
