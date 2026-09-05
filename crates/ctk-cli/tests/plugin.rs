@@ -64,13 +64,21 @@ fn wrapper_fails_open_when_ctk_is_missing() {
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
+    // Deliberately larger than a pipe buffer (64KB on Linux). A payload that
+    // fits gets buffered by the kernel, so the write succeeds whether or not
+    // anything reads it — which would let a wrapper that never drains stdin
+    // pass here and hand Claude Code an EPIPE in real use.
+    let payload = format!(
+        r#"{{"tool_name":"Read","tool_response":{{"pad":"{}"}}}}"#,
+        "x".repeat(256 * 1024)
+    );
     use std::io::Write as _;
     child
         .stdin
         .take()
         .unwrap()
-        .write_all(br#"{"tool_name":"Read","tool_response":{}}"#)
-        .unwrap();
+        .write_all(payload.as_bytes())
+        .expect("wrapper closed stdin without draining it (broken pipe)");
     let out = child.wait_with_output().unwrap();
     assert!(out.status.success(), "wrapper exited {:?}", out.status);
     assert!(

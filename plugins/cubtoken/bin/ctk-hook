@@ -21,8 +21,12 @@ if [ -z "$ctk" ]; then
 fi
 
 if [ -z "$ctk" ]; then
-    # Drain stdin so Claude Code's write side never sees EPIPE, then pass through.
-    cat >/dev/null 2>&1
+    # Drain stdin so Claude Code's write side never sees EPIPE, then pass
+    # through. This uses the `read` builtin rather than `cat` on purpose: a
+    # hook can run with a PATH that has no coreutils on it, and an unfound
+    # `cat` exits immediately without consuming stdin — causing the very
+    # broken pipe this drain exists to prevent.
+    while IFS= read -r _; do :; done
     exit 0
 fi
 
