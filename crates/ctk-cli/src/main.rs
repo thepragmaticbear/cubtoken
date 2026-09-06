@@ -29,6 +29,11 @@ enum Cmd {
         #[arg(long)]
         global: bool,
     },
+    /// Remove the hook from local Claude Code settings
+    Uninstall {
+        #[arg(long)]
+        global: bool,
+    },
     /// Report token savings from the local ledger
     Stats,
     /// Check installation health
@@ -43,6 +48,12 @@ fn main() {
         Cmd::Init { global } => {
             if let Err(e) = init::run(global) {
                 eprintln!("init failed: {e}");
+                std::process::exit(1);
+            }
+        }
+        Cmd::Uninstall { global } => {
+            if let Err(e) = init::uninstall(global) {
+                eprintln!("uninstall failed: {e}");
                 std::process::exit(1);
             }
         }
