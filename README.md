@@ -1,8 +1,11 @@
 # cubtoken
 
-A single Rust binary (`ctk`) that compresses a coding agent's **native tool outputs** — `Read`, `Grep`, `Glob`, and optionally `Bash` — before they enter the model's context window. Large file reads become tree-sitter signature skeletons with exact line ranges; noisy grep results fold per file; huge glob listings become directory trees. Zero workflow change.
+[![CI](https://github.com/brandonfla/cubtoken/actions/workflows/ci.yml/badge.svg)](https://github.com/brandonfla/cubtoken/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Hosts: **Claude Code** (all four tools) and **OpenCode** (`read`, via [`@cubtoken/opencode`](packages/opencode)). See [OpenCode](#opencode) for what does and doesn't carry over.
+A single Rust binary (`ctk`) that compresses Claude Code's **native tool outputs** — `Read`, `Grep`, `Glob`, and optionally `Bash` — before they enter the model's context window. Large file reads become tree-sitter signature skeletons with exact line ranges; noisy grep results fold per file; huge glob listings become directory trees. Zero workflow change.
+
+Host: **Claude Code** (all four tools). See [Other hosts](#other-hosts) for why nothing else is supported.
 
 **Where the evidence actually is:** large `Read` compression is the proven case — 76–88% estimated savings on the reads that trigger it. `Grep`, `Glob` and `Bash` folding are implemented and tested but fired rarely in dogfooding, so treat their value as unproven rather than typical. `ctk stats` reports what your own sessions did.
 
@@ -10,7 +13,7 @@ Stream compressors like [rtk](https://github.com/rtk-ai/rtk) only see commands r
 
 ## How it works
 
-cubtoken installs as a **post-tool hook**. The tool runs normally (a local file read costs nothing); the hook then replaces the result *before it reaches the model* — which is where tokens are actually spent. In Claude Code that replacement is `PostToolUse` + `updatedToolOutput`; in OpenCode it is the `tool.execute.after` plugin hook mutating the result object. Verified live: a session reading a 26KB source file received a ~70%-smaller skeleton view.
+cubtoken installs as a **post-tool hook**. The tool runs normally (a local file read costs nothing); the hook then replaces the result *before it reaches the model* — which is where tokens are actually spent. That replacement is Claude Code's `PostToolUse` + `updatedToolOutput`. Verified live: a session reading a 26KB source file received a ~70%-smaller skeleton view.
 
 ```
    42  pub struct Registry {
@@ -21,7 +24,7 @@ cubtoken installs as a **post-tool hook**. The tool runs normally (a local file 
         … [L51-L56]
 ```
 
-## Getting started (Claude Code)
+## Getting started
 
 0. **Requirements.** Claude Code with exec-form hooks (`command` + `args`) and `PostToolUse.updatedToolOutput`. Verified against Claude Code **2.1.258**; if `ctk doctor` passes but nothing ever compresses, update Claude Code first.
 
@@ -76,27 +79,18 @@ cubtoken installs as a **post-tool hook**. The tool runs normally (a local file 
 
 7. **Tune (optional).** Edit `.cubtoken.toml` to compress more or less — raise `read.threshold_tokens`, add globs to `read.never_compress`, or set `bash.enabled = true` if you do not run rtk. See [Configuration](#configuration-cubtokentoml-overlaid-on-configcubtokenconfigtoml) below. Config is re-read on every tool call, so edits apply to the next one — no restart needed (only installing the hook with `ctk init` requires a restart).
 
-## OpenCode
+## Other hosts
 
-[`@cubtoken/opencode`](packages/opencode) runs the same compressor in OpenCode, whose `tool.execute.after` plugin hook can replace a tool result the same way `updatedToolOutput` does in Claude Code. Install `ctk`, then:
-
-```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "plugin": ["@cubtoken/opencode"]
-}
-```
-
-Currently wired up: `read` compression and `edit`/`write` protection. `grep`/`glob`/`bash` pass through — that's where the evidence is, not a limitation of the hook.
+cubtoken is Claude Code only. An OpenCode adapter shipped once and was removed to keep a single host to support.
 
 Codex CLI and Antigravity can't host cubtoken today: neither one's post-tool hook can replace a tool result (Codex offers `systemMessage`/`continue`/`stopReason` only; Antigravity's `PostToolUse` isn't even told which tool ran).
 
 ## Design invariants
 
 1. **Fail open** — any internal error means the original output passes through untouched. The hook never breaks a session.
-2. **Escape hatch** — every compressed view names the exact tool call (`Read(offset, limit)`, `Grep(path=…)`, `Glob(pattern=…)`) that retrieves the elided content, and *every* elided line falls inside an advertised `[La-Lb]` range. Nothing is dropped silently — attributes, decorators and closing braces included. The spelling follows the host, since naming a call the agent doesn't have is the same as having no escape hatch: OpenCode gets `read(filePath=…)`, set by the adapter through `CUBTOKEN_HARNESS`.
-3. **Verbatim lines** — every source line shown in a skeleton is the exact file text at the stated line number, so quoted edits stay valid. Targeted `Read(offset/limit)` calls are never compressed, and a file the model has edited this session is never compressed again (Edit-protection ledger). Sequential numbering gets rendered around the substituted block — by Claude Code itself, and by the adapter in OpenCode — so the banner tells the model to read the *inner* gutter for real line numbers.
-4. **Deterministic** — same input, same output. No LLM calls, no network, fully local. Glob keeps the host's newest-first path ordering rather than sorting.
+2. **Escape hatch** — every compressed view names the exact tool call (`Read(offset, limit)`, `Grep(path=…)`, `Glob(pattern=…)`) that retrieves the elided content, and *every* elided line falls inside an advertised `[La-Lb]` range. Nothing is dropped silently — attributes, decorators and closing braces included.
+3. **Verbatim lines** — every source line shown in a skeleton is the exact file text at the stated line number, so quoted edits stay valid. Targeted `Read(offset/limit)` calls are never compressed, and a file the model has edited this session is never compressed again (Edit-protection ledger). Claude Code renders its own sequential numbering around the substituted block, so the banner tells the model to read the *inner* gutter for real line numbers.
+4. **Deterministic** — same input, same output. No LLM calls, no network, fully local. Glob keeps Claude Code's newest-first path ordering rather than sorting.
 5. **Never pay to compress** — Read, Grep, Glob and Bash each pass through unless the compressed form is at least 30% smaller. A wide, flat directory tree folds to roughly itself, so it is left alone.
 
 ## Configuration (`.cubtoken.toml`, overlaid on `~/.config/cubtoken/config.toml`)
@@ -114,7 +108,7 @@ Codex CLI and Antigravity can't host cubtoken today: neither one's post-tool hoo
 | `bash.enabled` | `false` | Minimal ANSI/progress strip; leave off if you use rtk |
 | `stats.ledger` | `true` | Record savings to `.cubtoken/` for `ctk stats` |
 
-Config is layered: built-in defaults, then the global `~/.config/cubtoken/config.toml`, then the project `.cubtoken.toml` in the directory the agent is running in (project wins on conflicts). The hook reads these per tool call against the session's working directory, so a single global install still honors each project's own `.cubtoken.toml` — drop one in any repo to tune it there. The same files apply in OpenCode; only the keys for tools that adapter wires up (`read`, `stats`) have any effect there.
+Config is layered: built-in defaults, then the global `~/.config/cubtoken/config.toml`, then the project `.cubtoken.toml` in the directory the agent is running in (project wins on conflicts). The hook reads these per tool call against the session's working directory, so a single global install still honors each project's own `.cubtoken.toml` — drop one in any repo to tune it there.
 
 Languages with skeleton support: Rust, TypeScript/TSX/JS, Python, Go (tree-sitter). Skeletons keep the context attached to a signature — Rust attributes (`#[derive]`, `#[cfg]`), Python decorators, doc comments — alongside the declaration itself. Other files fall back to head+tail elision with line numbers, which is truncation rather than summary; consider adding those extensions to `read.never_compress` if the head/tail view is not useful for them.
 
@@ -141,6 +135,9 @@ Layout beyond the Rust workspace:
 | `crates/` | `ctk-cli` → `ctk-hook` → `ctk-compress` → `ctk-sitter`, strictly layered |
 | `plugins/cubtoken/` | The Claude Code plugin (manifest, `hooks/hooks.json`, `bin/ctk-hook` wrapper) |
 | `.claude-plugin/marketplace.json` | Makes this repo installable as a plugin marketplace |
-| `packages/opencode/` | `@cubtoken/opencode`, the OpenCode adapter |
 
-`cargo test` covers the JS adapter too, via `crates/ctk-cli/tests/opencode.rs`, which runs `packages/opencode/test.js` against the freshly built binary. That test skips itself when `node` isn't installed rather than failing.
+Contributions are welcome — the gate above is what CI enforces, so run it before opening a PR.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
