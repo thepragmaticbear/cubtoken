@@ -135,8 +135,17 @@ Tool output and repository content remain untrusted input; compression is not a 
 
 ## Uninstall
 
-1. Remove the cubtoken entry from `PostToolUse` in `.claude/settings.local.json` or `~/.claude/settings.json`.
-2. Delete `.cubtoken.toml` and `.cubtoken/` if you do not want to keep configuration or statistics.
+1. Remove the hook — the inverse of `init`, run from the same place:
+
+   ```sh
+   ctk uninstall            # or: ctk uninstall --global
+   ```
+
+   It strips only cubtoken's `PostToolUse` entry, leaves every other hook and setting untouched, and cleans up the empty `hooks` scaffolding it created. If you installed globally but run a bare `ctk uninstall`, it tells you where the hook actually lives instead of reporting nothing found. Restart Claude Code afterwards — hooks are snapshotted at session start.
+
+   `uninstall` only touches settings files. If you installed the **plugin** instead of running `ctk init`, remove it through Claude Code's own `/plugin` management rather than here — the plugin's hook lives in the plugin, not in your settings.
+
+2. Delete `.cubtoken.toml` and `.cubtoken/` if you do not want to keep configuration or statistics. `uninstall` deliberately leaves both — they are your config and recorded savings, not install state.
 3. Run `cargo uninstall ctk-cli` if you installed from source, or delete the downloaded `ctk` binary.
 
 ## Development

@@ -30,7 +30,7 @@ cargo fmt --check && cargo clippy --locked --workspace --all-targets --all-featu
 
 CI runs this matrix on Ubuntu, macOS, and Windows. `clippy -- -D warnings` means warnings are build failures; keep it clean.
 
-Runtime commands of the binary itself: `ctk init [--global]` (install hook + write starter `.cubtoken.toml`), `ctk doctor` (health check), `ctk stats` (read savings from the ledger), `ctk hook` (the hook handler — stdin JSON → stdout decision JSON), `ctk record <path>` (append stdin to a JSONL file, used to capture real fixtures).
+Runtime commands of the binary itself: `ctk init [--global]` (install hook + write starter `.cubtoken.toml`), `ctk uninstall [--global]` (remove the hook; never touches `.cubtoken.toml`/`.cubtoken/`), `ctk doctor` (health check), `ctk stats` (read savings from the ledger), `ctk hook` (the hook handler — stdin JSON → stdout decision JSON), `ctk record <path>` (append stdin to a JSONL file, used to capture real fixtures).
 
 ## Architecture
 

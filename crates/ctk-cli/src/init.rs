@@ -27,6 +27,116 @@ pub fn run(global: bool) -> Result<(), String> {
     Ok(())
 }
 
+/// `ctk uninstall`: the inverse of `run`. Removes our PostToolUse entry from
+/// the same settings file `init` writes, leaves everything else alone, and
+/// never deletes `.cubtoken.toml` or `.cubtoken/` — those are the user's
+/// config and recorded savings, not install state.
+pub fn uninstall(global: bool) -> Result<(), String> {
+    let settings_path = settings_path(global)?;
+    let removed = remove_hook(&settings_path)?;
+
+    if removed == 0 {
+        println!("no cubtoken hook found in {}", settings_path.display());
+        // `init --global` followed by a bare `uninstall` would otherwise report
+        // "nothing found" while the global hook keeps running. Say where it is.
+        let elsewhere = other_scopes_with_hook(&settings_path);
+        if !elsewhere.is_empty() {
+            println!("but a cubtoken hook is still installed in:");
+            for path in &elsewhere {
+                println!("      {}", path.display());
+            }
+            println!(
+                "remove it with `ctk uninstall{}`",
+                if global { "" } else { " --global" }
+            );
+        }
+        return Ok(());
+    }
+
+    println!(
+        "cubtoken hook removed from {} ({removed} {})",
+        settings_path.display(),
+        if removed == 1 { "entry" } else { "entries" }
+    );
+    println!("note: Claude Code snapshots hooks at session start — restart your session");
+    println!("`.cubtoken.toml` and `.cubtoken/` were left in place; delete them to remove config and saved stats");
+    Ok(())
+}
+
+/// Strip our entries from `hooks.PostToolUse`, returning how many went. The
+/// file is only rewritten when something actually changed, and the empty
+/// `PostToolUse`/`hooks` containers we would leave behind are cleaned up.
+fn remove_hook(settings_path: &Path) -> Result<usize, String> {
+    reject_symlink(settings_path)?;
+    if let Some(parent) = settings_path.parent() {
+        reject_symlink(parent)?;
+    }
+    let mut settings: serde_json::Value = match std::fs::read_to_string(settings_path) {
+        Ok(content) => serde_json::from_str(&content)
+            .map_err(|e| format!("{} is not valid JSON: {e}", settings_path.display()))?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(error) => return Err(format!("cannot read {}: {error}", settings_path.display())),
+    };
+
+    let Some(entries) = settings
+        .pointer_mut("/hooks/PostToolUse")
+        .and_then(|p| p.as_array_mut())
+    else {
+        return Ok(0);
+    };
+    let before = entries.len();
+    entries.retain(|e| !is_ctk_hook_entry(e));
+    let removed = before - entries.len();
+    if removed == 0 {
+        return Ok(0);
+    }
+    let post_empty = entries.is_empty();
+
+    if let Some(hooks) = settings.get_mut("hooks").and_then(|h| h.as_object_mut()) {
+        if post_empty {
+            hooks.remove("PostToolUse");
+        }
+        if hooks.is_empty() {
+            settings
+                .as_object_mut()
+                .expect("settings is an object: we just indexed it")
+                .remove("hooks");
+        }
+    }
+
+    let pretty = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
+    atomic_write(settings_path, &(pretty + "\n"))?;
+    Ok(removed)
+}
+
+/// Settings files other than `exclude` that still carry a cubtoken hook.
+fn other_scopes_with_hook(exclude: &Path) -> Vec<PathBuf> {
+    let mut candidates = vec![
+        PathBuf::from(".claude/settings.json"),
+        PathBuf::from(".claude/settings.local.json"),
+    ];
+    if let Ok(global) = settings_path(true) {
+        candidates.push(global);
+    }
+    candidates
+        .into_iter()
+        .filter(|path| path != exclude && has_ctk_hook(path))
+        .collect()
+}
+
+fn has_ctk_hook(path: &Path) -> bool {
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    let Ok(settings) = serde_json::from_str::<serde_json::Value>(&content) else {
+        return false;
+    };
+    settings
+        .pointer("/hooks/PostToolUse")
+        .and_then(|p| p.as_array())
+        .is_some_and(|entries| entries.iter().any(is_ctk_hook_entry))
+}
+
 /// `cargo run`/`target/release` installs embed a path that `cargo clean`
 /// deletes. Detect that so `init` can say so instead of failing silently later.
 fn installed_from_build_dir() -> Option<String> {
