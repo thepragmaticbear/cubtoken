@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/ctk-cli", "crates/ctk-hook", "crates/ctk-compress", "crates/ctk-sitter"]
 
 [workspace.package]
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/thepragmaticbear/cubtoken"

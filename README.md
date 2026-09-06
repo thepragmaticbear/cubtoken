@@ -78,7 +78,12 @@ cubtoken installs as a **post-tool hook**. The tool runs normally (a local file 
    ctk doctor
    ```
 
-   `doctor` searches `.claude/settings.json`, `.claude/settings.local.json`, and the active global settings location, prints where it found the hook, and checks that the binary path in that entry still exists — `init` embeds an absolute path, so a `cargo clean` or a moved binary otherwise breaks every hook invocation silently. The `INFO  rtk …` line reports whether rtk is on your PATH — if it is, leave `bash.enabled = false` and let rtk handle Bash. The exit code is non-zero if any check fails.
+   `doctor` prints where it found the hook and checks it can actually run, for either install route:
+
+   - **`ctk init` installs** — searches `.claude/settings.json`, `.claude/settings.local.json`, and the active global settings location, then checks the binary path in that entry still exists. `init` embeds an absolute path, so a `cargo clean` or a moved binary otherwise breaks every hook invocation silently.
+   - **Plugin installs** — reads Claude Code's plugin index, since a plugin registers its hook in the plugin's own `hooks.json` and no settings file mentions it. It then checks the wrapper is executable and that `ctk` is resolvable, because the wrapper resolves `ctk` at call time and *fails open* when it can't — meaning a missing `ctk` shows up as silence, not an error.
+
+   The `INFO  rtk …` line reports whether rtk is on your PATH — if it is, leave `bash.enabled = false` and let rtk handle Bash. The exit code is non-zero if any check fails.
 
 5. **Work normally.** Nothing changes in how you use Claude Code. When the model runs `Read`, `Grep`, or `Glob` and the output is large, the hook swaps in the compressed view before it reaches the context window. Targeted `Read(offset, limit)` calls and files you have edited this session are left untouched.
 
