@@ -64,6 +64,7 @@ One non-Rust install path sits beside the crates:
 - **tree-sitter row gotcha:** a node ending at a newline reports end row = next row, col 0. Comment-adjacency logic in `ctk-sitter` must normalize this.
 - **Hooks snapshot at session start.** After `ctk init` or reinstalling, the user must restart their Claude Code session for changes to take effect.
 - **Two places know the hook matcher.** `init::MATCHER` and `plugins/cubtoken/hooks/hooks.json`. `crates/ctk-cli/tests/plugin.rs::matcher_matches_init` fails if they drift.
+- **Never put `archive: false` on `upload-artifact` in `release.yml`.** It reads as "don't double-zip an already-packaged file", but it makes the uploaded `.zip` *itself* the artifact container, so `download-artifact` extracts it — v0.1.0 shipped loose `ctk.exe`/`LICENSE`/`README.md` instead of `ctk-x86_64-pc-windows-msvc.zip`. A `.tar.gz` is not a zip container, so the Linux and macOS targets look fine and hide it. **CI never runs `release.yml`** (it triggers on `v*` tags only), so nothing catches a release bug until a real tag — the publish step now asserts it has exactly 3 archives so a partial set fails loudly instead of publishing quietly.
 
 ## Conventions
 
