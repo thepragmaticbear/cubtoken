@@ -2,5 +2,5 @@
   "name": "cubtoken",
   "description": "Compresses Read/Grep/Glob output before it reaches the model: large files become tree-sitter signature skeletons, greps fold per file, globs fold into a directory tree.",
   "version": "0.1.0",
-  "homepage": "https://github.com/brandonfla/cubtoken"
+  "homepage": "https://github.com/thepragmaticbear/cubtoken"
 }

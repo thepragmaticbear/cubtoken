@@ -7,7 +7,7 @@ release before reporting a problem that may already be fixed.
 
 ## Reporting a vulnerability
 
-Use [GitHub private vulnerability reporting](https://github.com/brandonfla/cubtoken/security/advisories/new).
+Use [GitHub private vulnerability reporting](https://github.com/thepragmaticbear/cubtoken/security/advisories/new).
 Do not include exploit details or sensitive data in a public issue.
 
 Include the affected cubtoken and Claude Code versions, operating system,
