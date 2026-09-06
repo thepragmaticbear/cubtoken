@@ -42,11 +42,15 @@ jobs:
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
         with:
           subject-path: ${{ matrix.artifact }}
+      # No `archive: false` here. It looks like it avoids double-zipping an
+      # already-packaged artifact, but it makes the uploaded .zip *be* the
+      # artifact container, so download-artifact extracts it and the Windows
+      # release ships loose ctk.exe/LICENSE/README.md instead of the .zip.
+      # The .tar.gz targets are unaffected, which is why this hid until v0.1.0.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ${{ matrix.target }}
           path: ${{ matrix.artifact }}
-          archive: false
 
   publish:
     needs: build
@@ -60,7 +64,14 @@ jobs:
           merge-multiple: true
       - name: Write checksums
         working-directory: dist
-        run: sha256sum ctk-* > SHA256SUMS
+        run: |
+          ls -1
+          # Fail loudly on a partial set. v0.1.0 shipped a 2-of-3 SHA256SUMS
+          # because the glob silently matched only what happened to be there.
+          count=$(ls -1 | wc -l)
+          test "$count" -eq 3 || { echo "expected 3 archives, found $count"; exit 1; }
+          sha256sum ctk-* > SHA256SUMS
+          cat SHA256SUMS
       - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:
           generate_release_notes: true
