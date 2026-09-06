@@ -1,6 +1,6 @@
 # cubtoken
 
-[![CI](https://github.com/brandonfla/cubtoken/actions/workflows/ci.yml/badge.svg)](https://github.com/brandonfla/cubtoken/actions/workflows/ci.yml)
+[![CI](https://github.com/thepragmaticbear/cubtoken/actions/workflows/ci.yml/badge.svg)](https://github.com/thepragmaticbear/cubtoken/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 A single Rust binary (`ctk`) that compresses Claude Code's **native tool outputs** — `Read`, `Grep`, `Glob`, and optionally `Bash` — before they enter the model's context window. Large file reads become tree-sitter signature skeletons with exact line ranges; noisy grep results fold per file; huge glob listings become directory trees. Zero workflow change.
@@ -28,10 +28,25 @@ cubtoken installs as a **post-tool hook**. The tool runs normally (a local file 
 
 0. **Requirements.** Claude Code with exec-form hooks (`command` + `args`) and `PostToolUse.updatedToolOutput`. Verified against Claude Code **2.1.258**; if `ctk doctor` passes but nothing ever compresses, update Claude Code first.
 
-1. **Get the binary.** Download a prebuilt archive from [Releases](https://github.com/brandonfla/cubtoken/releases) (each release ships `SHA256SUMS` and a build attestation, verifiable with `gh attestation verify`), or build from source:
+1. **Get the binary.** Prebuilt archives are on the [Releases](https://github.com/thepragmaticbear/cubtoken/releases) page for three targets:
+
+   | Platform | Archive |
+   |---|---|
+   | Linux x86_64 | `ctk-x86_64-unknown-linux-gnu.tar.gz` |
+   | macOS Apple Silicon | `ctk-aarch64-apple-darwin.tar.gz` |
+   | Windows x86_64 | `ctk-x86_64-pc-windows-msvc.zip` |
+
+   Anything else — Intel Macs and Linux ARM included — builds from source. Every release also ships `SHA256SUMS` and a build attestation:
 
    ```sh
-   git clone https://github.com/brandonfla/cubtoken.git
+   sha256sum -c SHA256SUMS --ignore-missing
+   gh attestation verify ctk-*.tar.gz --repo thepragmaticbear/cubtoken
+   ```
+
+   To build from source instead (stable Rust, no minimum version pinned):
+
+   ```sh
+   git clone https://github.com/thepragmaticbear/cubtoken.git
    cd cubtoken
    cargo install --locked --path crates/ctk-cli   # puts `ctk` on your PATH
    ```
@@ -49,7 +64,7 @@ cubtoken installs as a **post-tool hook**. The tool runs normally (a local file 
    **Or install the plugin instead.** `plugins/cubtoken/` ships the same hook as a Claude Code plugin, which resolves `ctk` at call time rather than baking in an absolute path — so `cargo clean` or moving the binary can't silently break it:
 
    ```sh
-   /plugin marketplace add brandonfla/cubtoken
+   /plugin marketplace add thepragmaticbear/cubtoken
    /plugin install cubtoken@cubtoken
    ```
 

@@ -205,7 +205,7 @@ fn replace_file(temp: &Path, destination: &Path) -> Result<(), String> {
 
 fn write_starter_config(path: &Path) {
     let starter = "\
-# cubtoken project config — see https://github.com/brandonfla/cubtoken
+# cubtoken project config — see https://github.com/thepragmaticbear/cubtoken
 [read]
 enabled = true
 threshold_tokens = 2000
