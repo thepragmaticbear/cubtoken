@@ -94,6 +94,29 @@ cubtoken installs as a **post-tool hook**. The tool runs normally (a local file 
 
 7. **Tune (optional).** Edit `.cubtoken.toml` to compress more or less — raise `read.threshold_tokens`, add globs to `read.never_compress`, or set `bash.enabled = true` if you do not run rtk. See [Configuration](#configuration-cubtokentoml-overlaid-on-configcubtokenconfigtoml) below. Config is re-read on every tool call, so edits apply to the next one — no restart needed (only installing the hook with `ctk init` requires a restart).
 
+## Updating
+
+New versions are published to [Releases](https://github.com/thepragmaticbear/cubtoken/releases). Update the same way you installed:
+
+| Installed with | Update |
+|---|---|
+| Prebuilt archive | Download the new archive and replace the `ctk` binary **at the path it already lives at** |
+| From source | `git pull && cargo install --locked --path crates/ctk-cli` |
+| Plugin | Update it through Claude Code's `/plugin` management |
+
+**Replacing the binary in place needs no restart.** `ctk init` stores an absolute path in your settings, and Claude Code executes that path fresh on every tool call — so a new binary at the same path takes effect on the next call. What gets snapshotted at session start is the hook *entry*, not the binary.
+
+You only need to re-run `ctk init` (and then restart) if the binary lands somewhere new — for example moving from a downloaded archive to `cargo install`, which puts `ctk` in `~/.cargo/bin`. The old entry would still point at the previous path.
+
+Either way, confirm afterwards:
+
+```sh
+ctk --version
+ctk doctor       # checks the path in your settings still resolves
+```
+
+`doctor` is the one that catches a stale install: it re-checks that the binary named in your hook entry still exists and is executable, which is exactly what breaks when a version update moves it.
+
 ## Other hosts
 
 cubtoken is Claude Code only. An OpenCode adapter shipped once and was removed to keep a single host to support.
