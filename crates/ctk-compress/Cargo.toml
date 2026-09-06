@@ -10,7 +10,7 @@ description = "Deterministic native-tool output compressors for cubtoken"
 serde.workspace = true
 serde_json.workspace = true
 globset = "0.4"
-ctk-sitter = { version = "0.1.1", path = "../ctk-sitter" }
+ctk-sitter = { version = "0.1.2", path = "../ctk-sitter" }
 toml = "1.1.2"
 
 [dev-dependencies]

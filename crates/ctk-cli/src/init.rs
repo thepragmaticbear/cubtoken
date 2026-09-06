@@ -146,15 +146,21 @@ fn installed_from_build_dir() -> Option<String> {
         .then(|| exe.display().to_string())
 }
 
+/// Claude Code's config directory: `$CLAUDE_CONFIG_DIR`, else `~/.claude`.
+/// Both the global settings file and the plugin install index live under it.
+pub fn config_dir() -> Result<PathBuf, String> {
+    if let Some(dir) = std::env::var_os("CLAUDE_CONFIG_DIR") {
+        return Ok(PathBuf::from(dir));
+    }
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .ok_or("HOME/USERPROFILE not set")?;
+    Ok(PathBuf::from(home).join(".claude"))
+}
+
 pub fn settings_path(global: bool) -> Result<PathBuf, String> {
     if global {
-        if let Some(config_dir) = std::env::var_os("CLAUDE_CONFIG_DIR") {
-            return Ok(PathBuf::from(config_dir).join("settings.json"));
-        }
-        let home = std::env::var_os("HOME")
-            .or_else(|| std::env::var_os("USERPROFILE"))
-            .ok_or("HOME/USERPROFILE not set")?;
-        Ok(PathBuf::from(home).join(".claude/settings.json"))
+        Ok(config_dir()?.join("settings.json"))
     } else {
         Ok(PathBuf::from(".claude/settings.local.json"))
     }

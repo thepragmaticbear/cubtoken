@@ -257,3 +257,125 @@ fn doctor_fails_when_the_installed_binary_is_gone() {
         "got: {out}"
     );
 }
+
+/// The current PATH with the binary under test prepended, so a plugin wrapper
+/// (and doctor's check that it can resolve `ctk`) behaves like a real install.
+fn path_with_ctk() -> std::ffi::OsString {
+    let ctk = assert_cmd::cargo::cargo_bin("ctk");
+    let bin_dir = ctk
+        .parent()
+        .expect("cargo_bin path has a parent")
+        .to_owned();
+    let existing = std::env::var_os("PATH").unwrap_or_default();
+    let mut dirs = vec![bin_dir];
+    dirs.extend(std::env::split_paths(&existing));
+    std::env::join_paths(dirs).expect("PATH entries contain no separator")
+}
+
+/// Build a fake Claude Code plugin install under `home`: the
+/// `installed_plugins.json` index, the plugin's own `hooks/hooks.json`, and an
+/// executable wrapper. Mirrors the real layout — the index points at an
+/// `installPath` and the hook command is `${CLAUDE_PLUGIN_ROOT}/bin/<wrapper>`.
+fn fake_plugin(home: &std::path::Path, key: &str, wrapper: &str, enabled: bool) {
+    let install = home.join("plugins/cache/cubtoken/cubtoken/0.1.2");
+    std::fs::create_dir_all(install.join("hooks")).unwrap();
+    std::fs::create_dir_all(install.join("bin")).unwrap();
+    let bin = install.join("bin").join(wrapper);
+    std::fs::write(&bin, "#!/bin/sh\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    std::fs::write(
+        install.join("hooks/hooks.json"),
+        serde_json::json!({"hooks": {"PostToolUse": [{
+            "matcher": MATCHER,
+            "hooks": [{"type": "command", "command": format!("${{CLAUDE_PLUGIN_ROOT}}/bin/{wrapper}")}]
+        }]}})
+        .to_string(),
+    )
+    .unwrap();
+
+    std::fs::create_dir_all(home.join("plugins")).unwrap();
+    std::fs::write(
+        home.join("plugins/installed_plugins.json"),
+        serde_json::json!({"version": 2, "plugins": {
+            key: [{"scope": "user", "installPath": install.to_str().unwrap()}]
+        }})
+        .to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        home.join("settings.json"),
+        serde_json::json!({"enabledPlugins": {key: enabled}}).to_string(),
+    )
+    .unwrap();
+}
+
+#[test]
+fn doctor_detects_an_enabled_plugin_install() {
+    // The plugin registers its hook in the plugin's own hooks.json, not in any
+    // settings file — doctor reported FAIL on a working plugin install.
+    let dir = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    fake_plugin(
+        &home.path().join(".claude"),
+        "cubtoken@cubtoken",
+        "ctk-hook",
+        true,
+    );
+    let assert = Command::cargo_bin("ctk")
+        .unwrap()
+        .current_dir(dir.path())
+        .env("HOME", home.path())
+        // The wrapper resolves `ctk` at call time, and doctor now checks that
+        // it can: put the binary under test on PATH the way a real install is.
+        .env("PATH", path_with_ctk())
+        .arg("doctor")
+        .assert()
+        .success();
+    let out = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    assert!(
+        out.contains("plugin"),
+        "doctor should name the plugin: {out}"
+    );
+}
+
+#[test]
+fn doctor_ignores_a_disabled_plugin() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    fake_plugin(
+        &home.path().join(".claude"),
+        "cubtoken@cubtoken",
+        "ctk-hook",
+        false,
+    );
+    Command::cargo_bin("ctk")
+        .unwrap()
+        .current_dir(dir.path())
+        .env("HOME", home.path())
+        .arg("doctor")
+        .assert()
+        .failure();
+}
+
+#[test]
+fn doctor_ignores_a_plugin_that_is_not_ours() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    fake_plugin(
+        &home.path().join(".claude"),
+        "somethingelse@market",
+        "other-hook",
+        true,
+    );
+    Command::cargo_bin("ctk")
+        .unwrap()
+        .current_dir(dir.path())
+        .env("HOME", home.path())
+        .arg("doctor")
+        .assert()
+        .failure();
+}
