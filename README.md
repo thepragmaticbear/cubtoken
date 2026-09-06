@@ -107,7 +107,9 @@ New versions are published to [Releases](https://github.com/thepragmaticbear/cub
 |---|---|
 | Prebuilt archive | Download the new archive and replace the `ctk` binary **at the path it already lives at** |
 | From source | `git pull && cargo install --locked --path crates/ctk-cli` |
-| Plugin | Update it through Claude Code's `/plugin` management |
+| Plugin | Update the plugin through `/plugin` **and** update the `ctk` binary — see below |
+
+> **The plugin is not the program.** It ships no binary: it registers the hook and its wrapper ends in `exec "$ctk" hook`, so every byte of behaviour — compression, `doctor`, `stats` — comes from whichever `ctk` is on your PATH. Updating the plugin alone bumps the hook registration and nothing else, which looks like the update silently did nothing. Update `ctk` itself with one of the first two rows, then check `ctk --version` matches the plugin's version.
 
 **Replacing the binary in place needs no restart.** `ctk init` stores an absolute path in your settings, and Claude Code executes that path fresh on every tool call — so a new binary at the same path takes effect on the next call. What gets snapshotted at session start is the hook *entry*, not the binary.
 
