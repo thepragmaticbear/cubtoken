@@ -218,11 +218,16 @@ fn wrapper_fallback_ctk() -> Option<PathBuf> {
     let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
     let home = PathBuf::from(home);
     [
-        home.join(".cargo/bin/ctk"),
-        home.join(".local/bin/ctk"),
-        PathBuf::from("/usr/local/bin/ctk"),
+        home.join(".cargo/bin"),
+        home.join(".local/bin"),
+        PathBuf::from("/usr/local/bin"),
     ]
     .into_iter()
+    .flat_map(|dir| {
+        executable_names("ctk")
+            .into_iter()
+            .map(move |name| dir.join(name))
+    })
     .find(|candidate| is_executable(candidate))
 }
 
@@ -242,11 +247,7 @@ fn hook_binary(command: &str, exec_form: bool) -> Option<PathBuf> {
         return Some(PathBuf::from(bin));
     }
     // bare `ctk`: resolve through PATH
-    std::env::var_os("PATH").and_then(|paths| {
-        std::env::split_paths(&paths)
-            .map(|d| d.join(bin))
-            .find(|p| p.is_file())
-    })
+    which_path(bin)
 }
 
 fn is_executable(path: &std::path::Path) -> bool {
@@ -306,7 +307,29 @@ fn report(what: &str, pass: bool) -> bool {
 }
 
 fn which(bin: &str) -> bool {
-    std::env::var_os("PATH")
-        .map(|paths| std::env::split_paths(&paths).any(|dir| dir.join(bin).is_file()))
-        .unwrap_or(false)
+    which_path(bin).is_some()
+}
+
+/// Resolve a bare command name through PATH. On Windows the file on disk is
+/// `ctk.exe`, so a lookup for the bare name finds nothing — which turned the
+/// plugin's "is `ctk` resolvable" check into a false FAIL for every Windows user.
+fn which_path(bin: &str) -> Option<PathBuf> {
+    let paths = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&paths) {
+        for name in executable_names(bin) {
+            let candidate = dir.join(&name);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
+fn executable_names(bin: &str) -> Vec<String> {
+    if cfg!(windows) {
+        vec![format!("{bin}.exe"), bin.to_string()]
+    } else {
+        vec![bin.to_string()]
+    }
 }
