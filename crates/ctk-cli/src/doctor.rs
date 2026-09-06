@@ -8,12 +8,32 @@ pub fn run() -> bool {
     let mut ok = true;
 
     let found = installed_hooks();
+    let plugins = installed_plugin_hooks();
     ok &= report(
-        "PostToolUse hook installed (project, local, or global settings)",
-        !found.is_empty(),
+        "PostToolUse hook installed (settings or plugin)",
+        !found.is_empty() || !plugins.is_empty(),
     );
     for hook in &found {
         println!("      {} → {}", hook.settings.display(), hook.command);
+    }
+    for plugin in &plugins {
+        println!("      plugin {} → {}", plugin.key, plugin.wrapper.display());
+    }
+
+    // A plugin ships no binary: the wrapper resolves `ctk` at call time and
+    // fails open when it can't. That silence is the whole failure mode, so
+    // check the wrapper is runnable and that `ctk` is actually findable.
+    for plugin in &plugins {
+        ok &= report(
+            &format!("plugin hook wrapper is executable ({})", plugin.key),
+            is_executable(&plugin.wrapper),
+        );
+    }
+    if !plugins.is_empty() {
+        ok &= report(
+            "ctk resolvable for the plugin wrapper (PATH or its fallbacks)",
+            which("ctk") || wrapper_fallback_ctk().is_some(),
+        );
     }
 
     // An `init` embeds an absolute path to the binary. Move or `cargo clean`
@@ -111,6 +131,99 @@ fn installed_hooks() -> Vec<InstalledHook> {
         }
     }
     found
+}
+
+struct PluginHook {
+    key: String,
+    wrapper: PathBuf,
+}
+
+/// A plugin registers its hook in the plugin's own `hooks/hooks.json`, which no
+/// settings file mentions — so `installed_hooks` is structurally blind to it and
+/// reported FAIL on a working plugin install. Claude Code's install index is the
+/// only place that maps a plugin to the directory it was installed into.
+///
+/// Best-effort throughout: a missing or reshaped index just means "no plugin
+/// found", never an error. Ownership is decided by the hook command naming our
+/// wrapper, not by the plugin's name, which a user can change.
+fn installed_plugin_hooks() -> Vec<PluginHook> {
+    let Ok(config) = init::config_dir() else {
+        return Vec::new();
+    };
+    let enabled = read_json(&config.join("settings.json"))
+        .and_then(|s| s.get("enabledPlugins").cloned())
+        .unwrap_or(serde_json::Value::Null);
+    let Some(index) = read_json(&config.join("plugins/installed_plugins.json")) else {
+        return Vec::new();
+    };
+    let Some(plugins) = index.get("plugins").and_then(|p| p.as_object()) else {
+        return Vec::new();
+    };
+
+    let mut found = Vec::new();
+    for (key, installs) in plugins {
+        if enabled.get(key).and_then(|v| v.as_bool()) != Some(true) {
+            continue;
+        }
+        for install in installs.as_array().unwrap_or(&Vec::new()) {
+            let Some(path) = install.get("installPath").and_then(|p| p.as_str()) else {
+                continue;
+            };
+            let root = PathBuf::from(path);
+            let Some(hooks) = read_json(&root.join("hooks/hooks.json")) else {
+                continue;
+            };
+            let Some(entries) = hooks
+                .pointer("/hooks/PostToolUse")
+                .and_then(|p| p.as_array())
+            else {
+                continue;
+            };
+            for command in entries
+                .iter()
+                .filter_map(|e| e.pointer("/hooks/0/command").and_then(|c| c.as_str()))
+            {
+                if let Some(wrapper) = our_plugin_wrapper(command, &root) {
+                    found.push(PluginHook {
+                        key: key.clone(),
+                        wrapper,
+                    });
+                }
+            }
+        }
+    }
+    found
+}
+
+/// `${CLAUDE_PLUGIN_ROOT}/bin/ctk-hook` → the resolved wrapper path, if the
+/// command is ours. Claude Code expands that variable at hook time; here we
+/// substitute the install directory the index gave us.
+fn our_plugin_wrapper(command: &str, root: &std::path::Path) -> Option<PathBuf> {
+    let command = command.trim().trim_matches(['"', '\'']);
+    let expanded = command
+        .replace("${CLAUDE_PLUGIN_ROOT}", &root.display().to_string())
+        .replace("$CLAUDE_PLUGIN_ROOT", &root.display().to_string());
+    let path = PathBuf::from(&expanded);
+    let name = path.file_name().and_then(std::ffi::OsStr::to_str)?;
+    (name == "ctk-hook" || name == "ctk-hook.cmd").then_some(path)
+}
+
+fn read_json(path: &std::path::Path) -> Option<serde_json::Value> {
+    serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()
+}
+
+/// The same fallbacks `plugins/cubtoken/bin/ctk-hook` searches when `ctk` is
+/// not on PATH. Kept in step with that script.
+fn wrapper_fallback_ctk() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
+    let home = PathBuf::from(home);
+    [
+        home.join(".cargo/bin/ctk"),
+        home.join(".local/bin/ctk"),
+        PathBuf::from("/usr/local/bin/ctk"),
+    ]
+    .into_iter()
+    .find(|candidate| is_executable(candidate))
 }
 
 /// `"/abs/path/ctk" hook` or `/abs/path/ctk hook` → the binary path.
