@@ -1,4 +1,4 @@
-# cubtoken project config — see https://github.com/brandon/cubtoken
+# cubtoken project config — see https://github.com/brandonfla/cubtoken
 [read]
 enabled = true
 threshold_tokens = 2000
