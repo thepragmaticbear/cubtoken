@@ -9,7 +9,8 @@ pub fn run() {
     let mut refetch_tokens = 0usize;
     let mut refetch_duration_ms = 0u64;
 
-    if let Ok(entries) = std::fs::read_dir(".cubtoken") {
+    let data = crate::project_root().join(".cubtoken");
+    if let Ok(entries) = std::fs::read_dir(&data) {
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().to_string();
             let Some(session) = name
@@ -18,7 +19,7 @@ pub fn run() {
             else {
                 continue;
             };
-            let ledger = Ledger::open(std::path::Path::new(".cubtoken"), session);
+            let ledger = Ledger::open(&data, session);
             refetches = refetches.saturating_add(ledger.refetches());
             refetch_tokens = refetch_tokens.saturating_add(ledger.refetch_tokens());
             refetch_duration_ms = refetch_duration_ms.saturating_add(ledger.refetch_duration_ms());
