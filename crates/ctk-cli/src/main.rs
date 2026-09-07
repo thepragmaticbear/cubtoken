@@ -7,6 +7,14 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 
+/// The project the current directory belongs to — the nearest ancestor with a
+/// `.cubtoken.toml` or `.git`, the same rule the hook uses to place
+/// `.cubtoken/`. Without this, reporting commands only work from the root.
+fn project_root() -> PathBuf {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    ctk_hook::project_root(&cwd)
+}
+
 #[derive(Parser)]
 #[command(
     name = "ctk",

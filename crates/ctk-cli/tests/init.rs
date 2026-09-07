@@ -379,3 +379,33 @@ fn doctor_ignores_a_plugin_that_is_not_ours() {
         .assert()
         .failure();
 }
+
+#[test]
+fn doctor_finds_the_install_from_a_subdirectory() {
+    // Reporting commands resolve the project root the same way the hook does,
+    // so `doctor` from deep in a tree checks the real install instead of
+    // reporting a missing hook.
+    let dir = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+    Command::cargo_bin("ctk")
+        .unwrap()
+        .current_dir(dir.path())
+        .env("HOME", home.path())
+        .arg("init")
+        .assert()
+        .success();
+
+    let deep = dir.path().join("crates/ctk-cli/src");
+    std::fs::create_dir_all(&deep).unwrap();
+    Command::cargo_bin("ctk")
+        .unwrap()
+        .current_dir(&deep)
+        .env("HOME", home.path())
+        .arg("doctor")
+        .assert()
+        .success();
+    // ...and the probe directory lands at the root, not in the subdirectory.
+    assert!(dir.path().join(".cubtoken").is_dir());
+    assert!(!deep.join(".cubtoken").exists());
+}

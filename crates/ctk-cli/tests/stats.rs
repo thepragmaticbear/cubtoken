@@ -66,3 +66,30 @@ fn stats_handles_untrusted_large_counts() {
         .assert()
         .success();
 }
+
+#[test]
+fn stats_finds_the_ledger_from_a_subdirectory() {
+    // The hook writes to `project_root(cwd)/.cubtoken` — the nearest ancestor
+    // holding `.cubtoken.toml` or `.git`. `stats` has to look in the same
+    // place, or it reports zero savings from anywhere but the root.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+    let data = dir.path().join(".cubtoken");
+    std::fs::create_dir_all(&data).unwrap();
+    std::fs::write(
+        data.join("session-a.jsonl"),
+        "{\"e\":\"save\",\"tool\":\"Read\",\"in\":10000,\"out\":1500}\n",
+    )
+    .unwrap();
+    let deep = dir.path().join("crates/ctk-cli/src");
+    std::fs::create_dir_all(&deep).unwrap();
+
+    let assert = Command::cargo_bin("ctk")
+        .unwrap()
+        .current_dir(&deep)
+        .arg("stats")
+        .assert()
+        .success();
+    let out = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    assert!(out.contains("10000"), "totals from a subdirectory: {out}");
+}

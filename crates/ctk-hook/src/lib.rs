@@ -1,6 +1,7 @@
 pub mod ledger;
 pub mod protocol;
 
+pub use ctk_compress::config::project_root;
 pub use ctk_compress::Config;
 pub use protocol::{HookOutput, HookPayload};
 

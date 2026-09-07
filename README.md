@@ -28,7 +28,7 @@ cubtoken installs as a **post-tool hook**. The tool runs normally (a local file 
 
 0. **Requirements.** Claude Code with exec-form hooks (`command` + `args`) and `PostToolUse.updatedToolOutput`. Verified against Claude Code **2.1.258**; if `ctk doctor` passes but nothing ever compresses, update Claude Code first.
 
-1. **Get the binary.** Prebuilt archives are on the [Releases](https://github.com/thepragmaticbear/cubtoken/releases) page for three targets:
+1. **Get the binary.** *(Required for both hook options below).* Prebuilt archives are on the [Releases](https://github.com/thepragmaticbear/cubtoken/releases) page for three targets:
 
    | Platform | Archive |
    |---|---|
@@ -48,27 +48,31 @@ cubtoken installs as a **post-tool hook**. The tool runs normally (a local file 
    ```sh
    git clone https://github.com/thepragmaticbear/cubtoken.git
    cd cubtoken
-   cargo install --locked --path crates/ctk-cli   # puts `ctk` on your PATH
+   cargo install --locked --path crates/ctk-cli
    ```
 
-   Install it somewhere permanent. `init` embeds the absolute path of whichever binary you ran it with, so installing the hook straight out of `./target/release` breaks the moment you `cargo clean` — `init` warns when it sees a `target/` path.
+   That puts `ctk` in `~/.cargo/bin`. Install it somewhere permanent. `init` embeds the absolute path of whichever binary you ran it with, so installing the hook straight out of `./target/release` breaks the moment you `cargo clean` — `init` warns when it sees a `target/` path.
 
-2. **Install the hook.** Run inside the project you want to compress:
+2. **Install the hook.** Choose one of two ways to register the hook:
 
-   ```sh
-   ctk init            # writes .claude/settings.local.json + a starter .cubtoken.toml
-   ```
+   - **Option A: `ctk init` (CLI)** — Run inside the project you want to compress:
 
-   The hook matches `Read|Grep|Glob|Bash|Edit|Write|NotebookEdit`. Use `ctk init --global` to install once for every project (`~/.claude/settings.json`, or `$CLAUDE_CONFIG_DIR/settings.json` when set); the global install does not write a `.cubtoken.toml`. `init` is idempotent — re-running it just refreshes the hook entry, and an existing `.cubtoken.toml` is never overwritten.
+     ```sh
+     ctk init
+     ```
 
-   **Or install the plugin instead.** `plugins/cubtoken/` ships the same hook as a Claude Code plugin, which resolves `ctk` at call time rather than baking in an absolute path — so `cargo clean` or moving the binary can't silently break it:
+     That writes `.claude/settings.local.json` plus a starter `.cubtoken.toml`, and the hook matches `Read|Grep|Glob|Bash|Edit|Write|NotebookEdit`. Use `ctk init --global` to install once for every project (`~/.claude/settings.json`, or `$CLAUDE_CONFIG_DIR/settings.json` when set); the global install does not write a `.cubtoken.toml`. `init` is idempotent — re-running it just refreshes the hook entry, and an existing `.cubtoken.toml` is never overwritten.
 
-   ```sh
-   /plugin marketplace add thepragmaticbear/cubtoken
-   /plugin install cubtoken@cubtoken
-   ```
+   - **Option B: Claude Code Plugin** — `plugins/cubtoken/` ships the same hook as a Claude Code plugin, which resolves `ctk` at call time rather than baking in an absolute path — so `cargo clean` or moving the binary can't silently break it:
 
-   Both commands run inside Claude Code, not in a shell. The plugin doesn't write a starter `.cubtoken.toml`; defaults apply until you add one. If the install summary says to run `/reload-plugins`, run it.
+     ```text
+     /plugin marketplace add thepragmaticbear/cubtoken
+     /plugin install cubtoken@cubtoken
+     ```
+
+     Both commands run inside Claude Code, not in a shell. The plugin doesn't write a starter `.cubtoken.toml`; defaults apply until you add one. If the install summary says to run `/reload-plugins`, run it.
+
+     > **Note: The plugin does not install the `ctk` binary.** The plugin only registers the hook inside Claude Code and executes a wrapper that delegates to `ctk hook` on tool calls. You must still complete **Step 1 (Get the binary)** so `ctk` is on your PATH (or in `~/.cargo/bin`, `~/.local/bin`, or `/usr/local/bin`). If `ctk` is not installed, the plugin safely passes output through uncompressed.
 
 3. **Restart Claude Code.** Hooks are snapshotted at session start, so the hook only takes effect in a session opened *after* `init` (plugin installs may instead prompt for `/reload-plugins`).
 
@@ -77,6 +81,8 @@ cubtoken installs as a **post-tool hook**. The tool runs normally (a local file 
    ```sh
    ctk doctor
    ```
+
+   **Run `ctk` from inside the project you installed it for.** `doctor` and `stats` report on one project at a time, and they resolve its root the way the hook does — the nearest ancestor holding `.cubtoken.toml` or `.git` — so any subdirectory works. Run them outside a project (your home directory, say) and there is nothing to report: `stats` prints `no savings recorded yet` and `doctor` finds no settings hook, whatever is installed elsewhere. `init` and `uninstall` are the exception: they write to `.claude/` in the directory you run them from, so run those at the project root.
 
    `doctor` prints where it found the hook and checks it can actually run, for either install route:
 
@@ -92,6 +98,10 @@ cubtoken installs as a **post-tool hook**. The tool runs normally (a local file 
    ```sh
    ctk stats
    ```
+
+   *(You can also run `!ctk stats` directly inside Claude Code).*
+
+   Savings are per project — each one keeps its own `.cubtoken/` at its root, and there is no cross-project total.
 
    Prints a per-tool table (`tokens in / out / saved / saved%`) plus a lifetime `TOTAL`, aggregated across every session ledger in `.cubtoken/` (which self-ignores via its own `.gitignore`, so it never shows up in `git status`). `no savings recorded yet` means no compressible tool calls have run in a post-`init` session — re-check step 3.
 
@@ -119,7 +129,7 @@ Either way, confirm afterwards:
 
 ```sh
 ctk --version
-ctk doctor       # checks the path in your settings still resolves
+ctk doctor
 ```
 
 `doctor` is the one that catches a stale install: it re-checks that the binary named in your hook entry still exists and is executable, which is exactly what breaks when a version update moves it.
@@ -168,10 +178,10 @@ Tool output and repository content remain untrusted input; compression is not a 
 1. Remove the hook — the inverse of `init`, run from the same place:
 
    ```sh
-   ctk uninstall            # or: ctk uninstall --global
+   ctk uninstall
    ```
 
-   It strips only cubtoken's `PostToolUse` entry, leaves every other hook and setting untouched, and cleans up the empty `hooks` scaffolding it created. If you installed globally but run a bare `ctk uninstall`, it tells you where the hook actually lives instead of reporting nothing found. Restart Claude Code afterwards — hooks are snapshotted at session start.
+   Use `ctk uninstall --global` for a global install. It strips only cubtoken's `PostToolUse` entry, leaves every other hook and setting untouched, and cleans up the empty `hooks` scaffolding it created. If you installed globally but run a bare `ctk uninstall`, it tells you where the hook actually lives instead of reporting nothing found. Restart Claude Code afterwards — hooks are snapshotted at session start.
 
    `uninstall` only touches settings files. If you installed the **plugin** instead of running `ctk init`, remove it through Claude Code's own `/plugin` management rather than here — the plugin's hook lives in the plugin, not in your settings.
 
