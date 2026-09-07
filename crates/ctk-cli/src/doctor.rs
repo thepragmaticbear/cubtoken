@@ -59,7 +59,7 @@ pub fn run() -> bool {
 
     ok &= report(
         ".cubtoken/ writable",
-        std::fs::create_dir_all(".cubtoken").is_ok(),
+        std::fs::create_dir_all(crate::project_root().join(".cubtoken")).is_ok(),
     );
 
     // rtk coexistence (informational only)
@@ -81,9 +81,10 @@ pub fn run() -> bool {
 /// is included because `init` writes there for absolute-path installs and a
 /// doctor that ignored it reported FAIL on a working setup.
 fn settings_files() -> Vec<PathBuf> {
+    let root = crate::project_root();
     let mut paths = vec![
-        PathBuf::from(".claude/settings.json"),
-        PathBuf::from(".claude/settings.local.json"),
+        root.join(".claude/settings.json"),
+        root.join(".claude/settings.local.json"),
     ];
     if let Ok(global) = init::settings_path(true) {
         paths.push(global);
