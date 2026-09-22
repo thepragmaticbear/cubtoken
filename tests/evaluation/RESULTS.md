@@ -3,8 +3,10 @@
 **Verdict: not ready to ship safe mode.** Of five acceptance gates, one passes
 (measurement integrity, tooling only), two are partial, and two have not run:
 
-- **Correctness** is partial. It is blocked on live-host evidence that an
-  automated session cannot produce.
+- **Correctness** is partial. The live event contract is now established on
+  Claude Code 2.1.280, including a high-confidence recovery recorded in a real
+  session. What's left is the live edit-protection smoke test and raw payload
+  fixtures for the new events.
 - **Performance** is partial. Per-Read overhead passes. The per-turn rebuild
   misses its target at 10,000 ledger records.
 - **Task outcomes** and **token benefit** have not run. Token benefit is the
@@ -121,24 +123,69 @@ behavioural: `ctk adaptive status` now reports `stats_ledger`,
 `learning_enabled: false`. Behaviour is pinned unchanged by
 `safe_mode_without_statistics_cannot_learn`.
 
-### Live host contract: NOT ESTABLISHED — blocking
+### Live host contract: ESTABLISHED for attribution (Claude Code 2.1.280)
 
-Per the spec, "a synthetic `PostToolBatch` test does not prove live delivery."
-This has **not** been demonstrated:
+Observed on 2026-09-22 in real sessions on Claude Code **2.1.280**, macOS, with
+the plugin at `78c4434`. The evidence is ledger records written by the
+installed hook as it responded to events Claude Code actually sent:
 
-- that the installed host actually emits `PostToolBatch` and `UserPromptSubmit`
-  for the batch and turn boundaries attribution depends on;
-- that the host accepts the `updatedToolOutput` replacement schema in a live
-  session;
-- the restart-and-smoke procedure against a real session.
+| Requirement | Evidence |
+| --- | --- |
+| `UserPromptSubmit` is delivered | `turn` records in three separate sessions |
+| `PostToolBatch` is delivered | 11 `batch` records in one session's first turn; 2 in another |
+| `Stop` is delivered | `output` records |
+| The replacement output is accepted | A full Read of `scripts/build-dashboard-data.ts` (8,524 estimated tokens) reached the model as a 3,614-token skeleton, and the model quoted its elided range `L357–581` back |
+| Attribution works live | A targeted `Read(offset=431, limit=16)` into that elided range, in batch 1 of the same turn, was recorded as a **high-confidence** targeted recovery linked to the decision |
 
-It requires installing the hook, restarting a Claude Code session, and capturing
-redacted real payloads with `ctk record` — none of which can be done from within
-a single automated session. The procedure is in
-[README.md](README.md) section 1.
+The attribution sequence, exactly as recorded:
 
-**This is unresolved, not a pass.** Until it is closed, inferred ordering must
-not be counted as high confidence and safe mode is not ready to ship.
+```text
+turn t1
+save      Read 8524 -> 3614 tokens, decision at t1 b0, typescript|skeleton
+batch     t1 b1
+recovery  targeted, confidence high, t1 b1, 131 tokens
+batch     t1 b2
+output
+```
+
+Not yet demonstrated:
+
+- `SessionStart`, `SessionEnd`, and `StopFailure` specifically. None of them
+  leaves an event-specific ledger record, and one adaptive-state write came
+  from either `Stop` or `SessionEnd` without showing which.
+- The edit-protection half of the smoke procedure in a live session: an Edit
+  followed by a Read that passes through.
+- Raw, redacted payload fixtures of the new events captured with `ctk record`.
+  The evidence above is the hook's own reaction to those events, which proves
+  delivery but isn't a payload contract test.
+
+### Findings from live sessions
+
+**Per-session worktrees fragment the governor.** The Claude Code desktop app
+ran each session in its own git worktree under `.claude/worktrees/`. A worktree
+has its own `.git`, so cubtoken treats it as a separate project, and two things
+follow:
+
+- An **untracked** `.cubtoken.toml` at the repository root isn't visible in the
+  worktree. The root reported `mode = "observe"`, while the worktree the test
+  ran in reported `mode = "off"`. Decisions and recoveries were recorded only
+  because statistics were on.
+- Each worktree keeps its own `.cubtoken/`. Observations never pool across
+  sessions, a bucket has to reach its 8-observation minimum inside one session,
+  and discarding the worktree deletes what was learned.
+
+The configuration half is solved by a global `~/.config/cubtoken/config.toml`
+or a committed `.cubtoken.toml`. The pooling half is an open design question.
+
+**Agents in auto mode read through Bash (n = 1).** An over-engineering audit of
+the same repository made **no** Read calls. It read about 68 KB through 13 Bash
+calls instead: one multi-file `cat`, hand-built outlines from `grep -nE
+"^export|^function"`, and targeted `sed -n a,bp` ranges. Those `sed` ranges are
+recoveries in all but name, but they go through a tool cubtoken leaves to rtk,
+so the governor sees none of them. Auto mode's instructions tell agents to read
+with `cat`, `head`, and `sed`, which likely explains this. It's one session, not
+a measured trend, but if it holds, it limits how much Read traffic cubtoken, and
+the governor with it, ever gets to act on.
 
 ---
 
@@ -405,7 +452,7 @@ does beyond the line I measured.
 
 | Gate | Verdict | What remains |
 | --- | --- | --- |
-| Correctness and compatibility | **PARTIAL** | Live host event/output contract not demonstrated. Blocking. |
+| Correctness and compatibility | **PARTIAL** | Live event contract established on Claude Code 2.1.280. Remaining: live edit-protection smoke test; raw payload fixtures for the new events. |
 | Measurement integrity | **PASS** (tooling) | Host usage mapping must be verified and recorded when runs happen. |
 | Task outcomes | **NOT RUN** | 40 scored runs. |
 | Token benefit and coverage | **NOT RUN** | Depends on the above. |
@@ -413,20 +460,20 @@ does beyond the line I measured.
 
 ## Recommendation
 
-**Defer the merge of safe mode as a shipping feature.** Two options remain open,
-exactly as the spec frames them:
+**Don't treat `safe` mode as a supported feature yet.** It is merged, off by
+default, and documented as experimental. Two paths remain, as the spec frames
+them:
 
-1. **Defer** until the live host contract is demonstrated, the 40 runs are
+1. **Keep it experimental** until the live edit-protection smoke test passes, the 40 runs are
    executed, and the rebuild bottleneck is either closed or the large-session
    fixture boundary is re-argued on evidence rather than convenience.
-2. **Revise the release scope to observation-only** — ship `off` and `observe`,
-   hold `safe` back — and review the corresponding code and documentation
-   changes as their own commit. This does **not** avoid the rebuild miss:
+2. **Narrow the release to observation-only**: withdraw `safe` and keep `off`
+   and `observe`, and review that change as its own commit. This does **not** avoid the rebuild miss:
    `refresh` runs on every `Stop` whenever the mode is not `off`, so `observe`
    pays the same per-turn cost as `safe`. It avoids only the correctness risk
    of acting on the policy.
 
-Whichever option is chosen, `185f0ca` should be reviewed on its own first. It
+Whichever path is chosen, `185f0ca` (in #24) should be reviewed on its own. It
 contains the two Critical ledger fixes, which change how edit protection
 records its state. They landed partway through the code review, so no one
 other than their author has examined them.
@@ -434,10 +481,9 @@ other than their author has examined them.
 The existing safe-mode shipping criteria are not optional merely because the
 feature is opt-in.
 
-The evaluation tooling, task matrix, and acceptance coverage in this branch are
-independently useful and can be reviewed and merged on their own. Pushing this
-branch for review is not a shipping decision, provided the missing evidence is
-stated — which is what this document is for.
+The evaluation tooling, task matrix, and acceptance coverage are merged (#24,
+#25). Merging them was not a decision to ship `safe`: that decision still rests
+on the evidence this document tracks.
 
 ## Reproducing the local artifacts
 
