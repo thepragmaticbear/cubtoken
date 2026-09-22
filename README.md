@@ -61,7 +61,7 @@ cubtoken installs as a **post-tool hook**. The tool runs normally (a local file 
      ctk init
      ```
 
-     That writes `.claude/settings.local.json` plus a starter `.cubtoken.toml`. `PostToolUse` matches `Read|Grep|Glob|Bash|Edit|Write|NotebookEdit`; cubtoken also registers silent lifecycle hooks for turns, tool batches, stops, and session end. Use `ctk init --global` to install once for every project (`~/.claude/settings.json`, or `$CLAUDE_CONFIG_DIR/settings.json` when set); the global install does not write a `.cubtoken.toml`. `init` is idempotent — re-running it just refreshes cubtoken's entries, and an existing `.cubtoken.toml` is never overwritten.
+     That writes `.claude/settings.local.json` plus a starter `.cubtoken.toml`. `PostToolUse` matches `Read|Grep|Glob|Bash|Edit|Write|NotebookEdit`. cubtoken also registers lifecycle hooks for session start, turns, tool batches, stops, and session end. They print nothing unless you opt in to `output.mode = "concise"`, and the [adaptive governor](#adaptive-read-governor-opt-in-experimental) needs them to tell which Reads were recoveries. The plugin registers the same set. Use `ctk init --global` to install once for every project (`~/.claude/settings.json`, or `$CLAUDE_CONFIG_DIR/settings.json` when set); the global install does not write a `.cubtoken.toml`. `init` is idempotent — re-running it just refreshes cubtoken's entries, and an existing `.cubtoken.toml` is never overwritten.
 
    - **Option B: Claude Code Plugin** — `plugins/cubtoken/` ships the same hook as a Claude Code plugin, which resolves `ctk` at call time rather than baking in an absolute path — so `cargo clean` or moving the binary can't silently break it:
 
@@ -105,9 +105,9 @@ cubtoken installs as a **post-tool hook**. The tool runs normally (a local file 
 
    Prints a per-tool table (`tokens in / out / saved / saved%`) plus a lifetime `TOTAL`, aggregated across every session ledger in `.cubtoken/` (which self-ignores via its own `.gitignore`, so it never shows up in `git status`). `no savings recorded yet` means no compressible tool calls have run in a post-`init` session — re-check step 3.
 
-   Counts are estimates (~3.5 chars/token), not tokenizer output. `ctk stats` keeps the legacy broad refetch total and separately reports **Net Context Saved**: gross Read savings minus high-confidence, causally attributable recovery Reads. Use `ctk stats --json` for automation. If net savings stalls, raise `read.threshold_tokens` so fewer files get skeletonized.
+   Counts are estimates (~3.5 chars/token), not tokenizer output. `ctk stats` also reports the legacy count of every follow-up `Read(offset/limit)` into a compressed file. Separately, it reports **Net Context Saved**: gross savings across all tools, minus Reads attributed with high confidence to recovering elided content. That figure floors at zero, so a net loss shows as `0`. `ctk stats --json` reports the parts (`gross_context_saved`, `attributed_recovery_tokens`) so you can compute a signed result. If net savings stalls, raise `read.threshold_tokens` so fewer files get skeletonized.
 
-   `ctk adaptive status` shows the local governor's samples and recommendation; `ctk adaptive explain <file>` shows the effective threshold for one file; `ctk adaptive reset` clears learned policy while retaining historical statistics. `ctk output status` reports the opt-in output profile and its estimated visible response tokens.
+   `ctk output status` reports the opt-in output profile and estimates how many tokens the assistant's visible replies use. The governor has its own commands, covered in [Adaptive Read governor](#adaptive-read-governor-opt-in-experimental).
 
 7. **Tune (optional).** Edit `.cubtoken.toml` to compress more or less — raise `read.threshold_tokens`, add globs to `read.never_compress`, or set `bash.enabled = true` if you do not run rtk. See [Configuration](#configuration-cubtokentoml-overlaid-on-configcubtokenconfigtoml) below. Config is re-read on every tool call, so edits apply to the next one — no restart needed (only installing the hook with `ctk init` requires a restart).
 
@@ -150,6 +150,28 @@ Codex CLI and Antigravity can't host cubtoken today: neither one's post-tool hoo
 4. **Deterministic** — same input, same output. No LLM calls, no network, fully local. Glob keeps Claude Code's newest-first path ordering rather than sorting.
 5. **Never pay to compress** — Read, Grep, Glob and Bash each pass through unless the compressed form is at least 30% smaller. A wide, flat directory tree folds to roughly itself, so it is left alone.
 
+## Adaptive Read governor (opt-in, experimental)
+
+A compressed Read only saves tokens if the model doesn't immediately read the elided lines back. The governor watches for those recoveries and, where they cost more than the compression saved, raises the Read threshold so fewer files get skeletonized. It is **off by default**.
+
+| `adaptive.mode` | Behaviour |
+|---|---|
+| `off` | Static thresholds. Nothing is learned. |
+| `observe` | Records decisions and recoveries and computes recommendations, but never changes a threshold. |
+| `safe` | Applies recommendations. Buckets are keyed by language, size band, and representation. Each bucket can move its threshold to 2x or 4x, or turn compression off, and it never moves back unless you run `ctk adaptive reset`. A bucket needs at least eight observations before it acts. |
+
+Only high-confidence recoveries train the policy. A recovery is high confidence when it happens in a later tool batch of the same turn, the file is unchanged and unedited, and the Read either overlaps an elided range or repeats the whole file. Weaker matches are written to the ledger but aren't counted by the policy or by `ctk stats`.
+
+**Keep `stats.ledger = true`.** The governor learns only from decisions recorded in the ledger, so with statistics off it learns nothing: `observe` records nothing, and `safe` only applies whatever it learned before statistics were turned off. `ctk adaptive status` warns about this and reports `learning_enabled`.
+
+- `ctk adaptive status [--json]` shows each bucket's observations, recovery overhead, and recommendation.
+- `ctk adaptive explain <file>` shows the mode, the configured and effective thresholds for that file, and whether its bucket's recommendation is actually applied. Only `safe` applies it.
+- `ctk adaptive reset` starts a new learning epoch and keeps the session ledgers.
+
+**Cost.** In `safe` mode, each Read adds a small state lookup. Adaptive state is rebuilt from **every** session ledger in `.cubtoken/` at the end of each turn. Nothing prunes that directory, so the rebuild gets slower as a project accumulates sessions.
+
+**Status.** `safe` has not been validated. Attribution depends on Claude Code delivering its tool-batch and turn events, and that hasn't yet been confirmed in a live session. It also hasn't been shown that the governor reduces total token use. Leave it off unless you're evaluating it.
+
 ## Configuration (`.cubtoken.toml`, overlaid on `~/.config/cubtoken/config.toml`)
 
 | Key | Default | Meaning |
@@ -164,7 +186,7 @@ Codex CLI and Antigravity can't host cubtoken today: neither one's post-tool hoo
 | `glob.max_paths` | `50` | Listings at or under this pass through |
 | `bash.enabled` | `false` | Minimal ANSI/progress strip; leave off if you use rtk |
 | `stats.ledger` | `true` | Record savings to `.cubtoken/` for `ctk stats` |
-| `adaptive.mode` | `off` | `off`, `observe`, or conservative one-way `safe` Read backoff |
+| `adaptive.mode` | `off` | `off`, `observe`, or `safe`. See [Adaptive Read governor](#adaptive-read-governor-opt-in-experimental); needs `stats.ledger = true` |
 | `output.mode` | `default` | `default` or opt-in `concise` SessionStart instruction |
 
 Config is layered: built-in defaults, then the global `~/.config/cubtoken/config.toml`, then the project `.cubtoken.toml` in the directory the agent is running in (project wins on conflicts). The hook reads these per tool call against the session's working directory, so a single global install still honors each project's own `.cubtoken.toml` — drop one in any repo to tune it there.
@@ -173,7 +195,7 @@ Languages with skeleton support: Rust, TypeScript/TSX/JS, Python, Go (tree-sitte
 
 ## Security and privacy
 
-cubtoken is local and deterministic: it makes no network requests and never executes text from tool output. The `.cubtoken/` ledger contains file paths and usage totals, not file contents. `ctk record` is different: it deliberately saves raw hook payloads for debugging, which can contain source code, command output, paths, and secrets. Do not commit recordings.
+cubtoken is local and deterministic: it makes no network requests and never executes text from tool output. The `.cubtoken/` directory holds file paths, token counts, compression decisions with their elided line ranges, a non-cryptographic hash of each compressed file's contents, turn and batch counters, and learned adaptive policy. It never stores file contents or message text: from the assistant's reply it records only an estimated token count. `ctk record` is different: it deliberately saves raw hook payloads for debugging, which can contain source code, command output, paths, and secrets. Do not commit recordings.
 
 Tool output and repository content remain untrusted input; compression is not a security filter. See [SECURITY.md](SECURITY.md) for the threat model and private vulnerability reporting.
 
@@ -189,7 +211,7 @@ Tool output and repository content remain untrusted input; compression is not a 
 
    `uninstall` only touches settings files. If you installed the **plugin** instead of running `ctk init`, remove it through Claude Code's own `/plugin` management rather than here — the plugin's hook lives in the plugin, not in your settings.
 
-2. Delete `.cubtoken.toml` and `.cubtoken/` if you do not want to keep configuration or statistics. `uninstall` deliberately leaves both — they are your config and recorded savings, not install state.
+2. Delete `.cubtoken.toml` and `.cubtoken/` if you do not want to keep configuration or statistics. `uninstall` deliberately leaves both — they are your config, recorded savings, and any learned adaptive policy, not install state.
 3. Run `cargo uninstall ctk-cli` if you installed from source, or delete the downloaded `ctk` binary.
 
 ## Development
@@ -197,7 +219,13 @@ Tool output and repository content remain untrusted input; compression is not a 
 ### Compression test plan
 
 1. Run `cargo test --locked -p ctk-compress -p ctk-sitter` while changing a representation. These tests enforce the 30% savings gate, response shape, parser fallback, verbatim displayed lines, and complete elision ranges.
-2. Run `cargo test --locked -p ctk-hook` while changing dispatch, ledger, or adaptive behavior. Recorded fixtures cover Claude's payload contract; integration tests cover targeted/edited-file pass-through, lock contention, one-time recovery escapes, and concurrent state writes.
+2. Run `cargo test --locked -p ctk-hook` while changing dispatch, ledger, or adaptive behavior. Recorded fixtures cover Claude's payload contract; Integration tests cover:
+   - targeted and edited-file pass-through;
+   - lock contention;
+   - one-time recovery escapes;
+   - concurrent state writes;
+   - recovery attribution and its edit backstop;
+   - regressions for edit protection surviving an unavailable lock, symlinked session files, and a reset racing a refresh.
 3. If Claude changes a payload, capture it with `ctk record`, redact it, add it under `tests/fixtures/`, and write the contract test before changing the parser.
 4. Before release, run `cargo fmt --check && cargo clippy --locked --workspace --all-targets --all-features -- -D warnings && cargo test --locked --workspace --all-features && cargo audit --deny warnings`. Then smoke-test a fresh Claude session: one large untouched Read compresses, its targeted refetch does not, an edited file stays untouched, and `ctk stats --json` records the result.
 

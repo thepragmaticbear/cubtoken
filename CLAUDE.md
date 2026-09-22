@@ -56,7 +56,7 @@ One non-Rust install path sits beside the crates:
 
 **Data flow:** Claude runs a matched tool → PostToolUse fires `ctk hook` → `run_hook` parses stdin → `dispatch` returns either a replacement `tool_response` value (wrapped as `updatedToolOutput`) or `None` (pass through). `dispatch` also intercepts `Edit`/`Write`/`NotebookEdit` to record the edited path in the ledger, then returns `None`.
 
-**Ledger** (`<cwd>/.cubtoken/session-<session_id>.jsonl`): locked, append-only JSONL recording edits, compression decisions, recoveries, turn/batch boundaries, and visible output totals. Replayed on open. It protects edited files, supplies `ctk stats`, and feeds the adaptive Read governor. If the session lock is unavailable, a Read passes through rather than acting on stale state. Writes are best-effort and hook failures remain silent.
+**Ledger** (`<cwd>/.cubtoken/session-<session_id>.jsonl`): locked, append-only JSONL recording edits, compression decisions, recoveries, turn/batch boundaries, and visible output totals. Replayed on open. It protects edited files, supplies `ctk stats`, and feeds the adaptive Read governor. If the session lock is unavailable, a Read passes through rather than acting on stale state. Writes are best-effort and hook failures remain silent — **except edit records, which `append_durable` writes whether or not the lock is held.** That is deliberate: every hook call is a fresh process, so an edit dropped for want of the lock would leave an edited file compressible for the rest of the session. Don't route edits back through the locked `append`; `tests/defects.rs` fails if you do. It also refuses to append through a symlinked session file.
 
 ## Invariants
 
