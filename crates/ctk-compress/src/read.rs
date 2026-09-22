@@ -12,12 +12,55 @@ pub struct ReadOutcome {
     pub updated_response: Value,
     pub tokens_in: usize,
     pub tokens_out: usize,
+    pub metadata: ReadMetadata,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ReadMetadata {
+    pub content_fingerprint: String,
+    pub language: String,
+    pub strategy: String,
+    pub elided_ranges: Vec<ctk_sitter::LineRange>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ReadPreview {
+    pub tokens_in: usize,
+    pub language: String,
+    pub strategy: String,
 }
 
 pub fn compress_read(
     tool_input: &Value,
     tool_response: &Value,
     cfg: &Config,
+) -> Option<ReadOutcome> {
+    compress_read_with_threshold(tool_input, tool_response, cfg, cfg.read.threshold_tokens)
+}
+
+/// Metadata used to select an adaptive threshold before compression.
+pub fn preview_read(tool_input: &Value, tool_response: &Value) -> Option<ReadPreview> {
+    let file_path = tool_input.get("file_path")?.as_str()?;
+    let content = extract_content(tool_response)?;
+    Some(preview_content(file_path, content))
+}
+
+pub fn preview_content(file_path: &str, content: &str) -> ReadPreview {
+    let view = read_view(content, file_path);
+    ReadPreview {
+        tokens_in: est_tokens(content),
+        language: view.language,
+        strategy: view.strategy,
+    }
+}
+
+/// Compress with a caller-selected threshold. The threshold can only make a
+/// Read pass through; it never changes global configuration or representation.
+pub fn compress_read_with_threshold(
+    tool_input: &Value,
+    tool_response: &Value,
+    cfg: &Config,
+    threshold_tokens: usize,
 ) -> Option<ReadOutcome> {
     if !cfg.read.enabled {
         return None;
@@ -31,11 +74,11 @@ pub fn compress_read(
     }
     let content = extract_content(tool_response)?;
     let tokens_in = est_tokens(content);
-    if tokens_in <= cfg.read.threshold_tokens {
+    if tokens_in <= threshold_tokens {
         return None;
     }
 
-    let view = skeleton_view(content, file_path).unwrap_or_else(|| head_tail_view(content));
+    let view = read_view(content, file_path);
     let compressed = format!(
         "[cubtoken: compressed view of {file_path} — {} chars → skeleton. \
          This is NOT the full file. The Read tool adds its own sequential \
@@ -43,8 +86,9 @@ pub fn compress_read(
          line numbers are the ones in this view, and bracketed [La-Lb] ranges \
          mark elided lines — to see any of them run Read(file_path={file_path}, \
          offset=<first line>, limit=<line count>). Before quoting or editing \
-         this file, Read the exact target region first.]\n\n{view}",
-        content.chars().count()
+         this file, Read the exact target region first.]\n\n{}",
+        content.chars().count(),
+        view.rendered
     );
 
     // not worth substituting unless meaningfully smaller
@@ -56,6 +100,12 @@ pub fn compress_read(
         updated_response: rebuild_response(tool_response, &compressed),
         tokens_in,
         tokens_out,
+        metadata: ReadMetadata {
+            content_fingerprint: content_fingerprint(content),
+            language: view.language,
+            strategy: view.strategy,
+            elided_ranges: view.elided_ranges,
+        },
     })
 }
 
@@ -87,22 +137,44 @@ fn rebuild_response(tool_response: &Value, compressed: &str) -> Value {
     updated
 }
 
-fn skeleton_view(content: &str, file_path: &str) -> Option<String> {
+struct ReadView {
+    rendered: String,
+    language: String,
+    strategy: String,
+    elided_ranges: Vec<ctk_sitter::LineRange>,
+}
+
+fn read_view(content: &str, file_path: &str) -> ReadView {
+    skeleton_view(content, file_path).unwrap_or_else(|| head_tail_view(content))
+}
+
+fn skeleton_view(content: &str, file_path: &str) -> Option<ReadView> {
     let lang = ctk_sitter::lang_for_path(file_path)?;
-    Some(ctk_sitter::skeleton(content, lang)?.rendered)
+    let skeleton = ctk_sitter::skeleton(content, lang)?;
+    Some(ReadView {
+        rendered: skeleton.rendered,
+        language: format!("{lang:?}").to_lowercase(),
+        strategy: "skeleton".to_string(),
+        elided_ranges: skeleton.elided_ranges,
+    })
 }
 
 const HEAD_LINES: usize = 40;
 const TAIL_LINES: usize = 20;
 
 /// Unknown language / unparseable: keep head and tail with line numbers.
-fn head_tail_view(content: &str) -> String {
+fn head_tail_view(content: &str) -> ReadView {
     let lines: Vec<&str> = content.lines().collect();
     let mut out = String::new();
+    let mut elided_ranges = Vec::new();
     for (i, line) in lines.iter().take(HEAD_LINES).enumerate() {
         out.push_str(&format!("{:>5}  {line}\n", i + 1));
     }
     if lines.len() > HEAD_LINES + TAIL_LINES {
+        elided_ranges.push(ctk_sitter::LineRange {
+            start_line: HEAD_LINES + 1,
+            end_line: lines.len() - TAIL_LINES,
+        });
         out.push_str(&format!(
             "       … [L{}-L{} elided] …\n",
             HEAD_LINES + 1,
@@ -115,7 +187,23 @@ fn head_tail_view(content: &str) -> String {
             out.push_str(&format!("{:>5}  {line}\n", i + 1));
         }
     }
-    out
+    ReadView {
+        rendered: out,
+        language: "other".to_string(),
+        strategy: "head_tail".to_string(),
+        elided_ranges,
+    }
+}
+
+/// Versioned FNV-1a fingerprint. It is deterministic, contains no source
+/// content, and leaves room for a future algorithm migration.
+pub fn content_fingerprint(content: &str) -> String {
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    for byte in content.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("fnv1a64:{hash:016x}")
 }
 
 #[cfg(test)]
@@ -193,6 +281,19 @@ mod tests {
         assert!(compressed.contains("line number 200"), "tail present");
         assert!(compressed.contains("elided"), "elision marker present");
         assert!(out.tokens_out < out.tokens_in);
+    }
+
+    #[test]
+    fn preview_uses_the_parser_fallback_representation() {
+        let body: String = (1..=200)
+            .map(|i| format!("// line {i} {}\n", "x".repeat(80)))
+            .collect();
+        let (input, response) = payload("/repo/comments.rs", &body);
+        let preview = preview_read(&input, &response).unwrap();
+        let outcome = compress_read(&input, &response, &low_threshold()).unwrap();
+        assert_eq!(preview.language, outcome.metadata.language);
+        assert_eq!(preview.strategy, outcome.metadata.strategy);
+        assert_eq!(preview.strategy, "head_tail");
     }
 
     #[test]

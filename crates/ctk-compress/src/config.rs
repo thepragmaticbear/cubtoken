@@ -10,6 +10,8 @@ pub struct Config {
     pub glob: GlobCfg,
     pub bash: BashCfg,
     pub stats: StatsCfg,
+    pub adaptive: AdaptiveCfg,
+    pub output: OutputCfg,
 }
 
 #[derive(Debug, Clone)]
@@ -41,6 +43,33 @@ pub struct BashCfg {
 #[derive(Debug, Clone)]
 pub struct StatsCfg {
     pub ledger: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AdaptiveMode {
+    #[default]
+    Off,
+    Observe,
+    Safe,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct AdaptiveCfg {
+    pub mode: AdaptiveMode,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OutputMode {
+    #[default]
+    Default,
+    Concise,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct OutputCfg {
+    pub mode: OutputMode,
 }
 
 impl Default for ReadCfg {
@@ -110,6 +139,10 @@ struct RawConfig {
     bash: RawBash,
     #[serde(default)]
     stats: RawStats,
+    #[serde(default)]
+    adaptive: RawAdaptive,
+    #[serde(default)]
+    output: RawOutput,
 }
 
 #[derive(Debug, Default, serde::Deserialize)]
@@ -145,6 +178,18 @@ struct RawBash {
 #[serde(deny_unknown_fields)]
 struct RawStats {
     ledger: Option<bool>,
+}
+
+#[derive(Debug, Default, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawAdaptive {
+    mode: Option<AdaptiveMode>,
+}
+
+#[derive(Debug, Default, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawOutput {
+    mode: Option<OutputMode>,
 }
 
 impl Config {
@@ -232,6 +277,12 @@ impl Config {
         }
         if let Some(v) = raw.stats.ledger {
             self.stats.ledger = v;
+        }
+        if let Some(v) = raw.adaptive.mode {
+            self.adaptive.mode = v;
+        }
+        if let Some(v) = raw.output.mode {
+            self.output.mode = v;
         }
     }
 }
@@ -328,5 +379,22 @@ mod tests {
         let c = Config::default();
         assert!(c.read.is_excluded(".env"));
         assert!(c.read.is_excluded("app/.env.local"));
+    }
+
+    #[test]
+    fn adaptive_and_output_modes_are_strict_and_layered() {
+        let c = Config::load_from(
+            Some("[adaptive]\nmode = \"observe\""),
+            Some("[adaptive]\nmode = \"safe\"\n[output]\nmode = \"concise\""),
+        );
+        assert_eq!(c.adaptive.mode, AdaptiveMode::Safe);
+        assert_eq!(c.output.mode, OutputMode::Concise);
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(".cubtoken.toml"),
+            "[output]\nmode = \"brief\"",
+        )
+        .unwrap();
+        assert!(Config::try_load_for(dir.path()).is_err());
     }
 }

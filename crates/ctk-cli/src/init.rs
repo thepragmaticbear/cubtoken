@@ -6,6 +6,15 @@ use std::path::{Path, PathBuf};
 use std::{ffi::OsStr, io::Write as _};
 
 pub const MATCHER: &str = "Read|Grep|Glob|Bash|Edit|Write|NotebookEdit";
+pub const EVENTS: &[&str] = &[
+    "SessionStart",
+    "UserPromptSubmit",
+    "PostToolUse",
+    "PostToolBatch",
+    "Stop",
+    "StopFailure",
+    "SessionEnd",
+];
 
 pub fn run(global: bool) -> Result<(), String> {
     let settings_path = settings_path(global)?;
@@ -63,9 +72,7 @@ pub fn uninstall(global: bool) -> Result<(), String> {
     Ok(())
 }
 
-/// Strip our entries from `hooks.PostToolUse`, returning how many went. The
-/// file is only rewritten when something actually changed, and the empty
-/// `PostToolUse`/`hooks` containers we would leave behind are cleaned up.
+/// Strip every cubtoken-owned event entry without touching another hook.
 fn remove_hook(settings_path: &Path) -> Result<usize, String> {
     reject_symlink(settings_path)?;
     if let Some(parent) = settings_path.parent() {
@@ -78,30 +85,37 @@ fn remove_hook(settings_path: &Path) -> Result<usize, String> {
         Err(error) => return Err(format!("cannot read {}: {error}", settings_path.display())),
     };
 
-    let Some(entries) = settings
-        .pointer_mut("/hooks/PostToolUse")
-        .and_then(|p| p.as_array_mut())
+    let Some(hooks) = settings
+        .get_mut("hooks")
+        .and_then(|value| value.as_object_mut())
     else {
         return Ok(0);
     };
-    let before = entries.len();
-    entries.retain(|e| !is_ctk_hook_entry(e));
-    let removed = before - entries.len();
+    let mut removed = 0;
+    for event in EVENTS {
+        let Some(entries) = hooks.get_mut(*event).and_then(|value| value.as_array_mut()) else {
+            continue;
+        };
+        let before = entries.len();
+        entries.retain(|entry| !is_ctk_hook_entry(entry));
+        removed += before - entries.len();
+    }
     if removed == 0 {
         return Ok(0);
     }
-    let post_empty = entries.is_empty();
-
-    if let Some(hooks) = settings.get_mut("hooks").and_then(|h| h.as_object_mut()) {
-        if post_empty {
-            hooks.remove("PostToolUse");
+    for event in EVENTS {
+        if hooks
+            .get(*event)
+            .is_some_and(|value| value.as_array().is_some_and(Vec::is_empty))
+        {
+            hooks.remove(*event);
         }
-        if hooks.is_empty() {
-            settings
-                .as_object_mut()
-                .expect("settings is an object: we just indexed it")
-                .remove("hooks");
-        }
+    }
+    if hooks.is_empty() {
+        settings
+            .as_object_mut()
+            .expect("settings is an object: we just indexed it")
+            .remove("hooks");
     }
 
     let pretty = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
@@ -131,10 +145,12 @@ fn has_ctk_hook(path: &Path) -> bool {
     let Ok(settings) = serde_json::from_str::<serde_json::Value>(&content) else {
         return false;
     };
-    settings
-        .pointer("/hooks/PostToolUse")
-        .and_then(|p| p.as_array())
-        .is_some_and(|entries| entries.iter().any(is_ctk_hook_entry))
+    EVENTS.iter().any(|event| {
+        settings
+            .pointer(&format!("/hooks/{event}"))
+            .and_then(|value| value.as_array())
+            .is_some_and(|entries| entries.iter().any(is_ctk_hook_entry))
+    })
 }
 
 /// `cargo run`/`target/release` installs embed a path that `cargo clean`
@@ -197,21 +213,24 @@ fn install_hook(settings_path: &Path) -> Result<(), String> {
         .unwrap()
         .entry("hooks")
         .or_insert_with(|| serde_json::json!({}));
-    let post = hooks
+    let hooks = hooks
         .as_object_mut()
-        .ok_or("settings.hooks is not an object")?
-        .entry("PostToolUse")
-        .or_insert_with(|| serde_json::json!([]));
-    let entries = post
-        .as_array_mut()
-        .ok_or("settings.hooks.PostToolUse is not an array")?;
-
-    // remove any prior ctk entry, then append ours (idempotent)
-    entries.retain(|e| !is_ctk_hook_entry(e));
-    entries.push(serde_json::json!({
-        "matcher": MATCHER,
-        "hooks": [{ "type": "command", "command": hook_command(), "args": ["hook"] }]
-    }));
+        .ok_or("settings.hooks is not an object")?;
+    for event in EVENTS {
+        let entries = hooks
+            .entry(*event)
+            .or_insert_with(|| serde_json::json!([]))
+            .as_array_mut()
+            .ok_or_else(|| format!("settings.hooks.{event} is not an array"))?;
+        entries.retain(|entry| !is_ctk_hook_entry(entry));
+        let mut entry = serde_json::json!({
+            "hooks": [{ "type": "command", "command": hook_command(), "args": ["hook"] }]
+        });
+        if *event == "PostToolUse" {
+            entry["matcher"] = serde_json::Value::String(MATCHER.to_string());
+        }
+        entries.push(entry);
+    }
 
     if let Some(parent) = settings_path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -341,6 +360,12 @@ enabled = false  # set true if you don't use rtk
 
 [stats]
 ledger = true
+
+[adaptive]
+mode = \"observe\"
+
+[output]
+mode = \"default\"
 ";
     if let Ok(mut file) = std::fs::OpenOptions::new()
         .write(true)

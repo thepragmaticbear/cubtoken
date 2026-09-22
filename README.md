@@ -61,7 +61,7 @@ cubtoken installs as a **post-tool hook**. The tool runs normally (a local file 
      ctk init
      ```
 
-     That writes `.claude/settings.local.json` plus a starter `.cubtoken.toml`, and the hook matches `Read|Grep|Glob|Bash|Edit|Write|NotebookEdit`. Use `ctk init --global` to install once for every project (`~/.claude/settings.json`, or `$CLAUDE_CONFIG_DIR/settings.json` when set); the global install does not write a `.cubtoken.toml`. `init` is idempotent — re-running it just refreshes the hook entry, and an existing `.cubtoken.toml` is never overwritten.
+     That writes `.claude/settings.local.json` plus a starter `.cubtoken.toml`. `PostToolUse` matches `Read|Grep|Glob|Bash|Edit|Write|NotebookEdit`; cubtoken also registers silent lifecycle hooks for turns, tool batches, stops, and session end. Use `ctk init --global` to install once for every project (`~/.claude/settings.json`, or `$CLAUDE_CONFIG_DIR/settings.json` when set); the global install does not write a `.cubtoken.toml`. `init` is idempotent — re-running it just refreshes cubtoken's entries, and an existing `.cubtoken.toml` is never overwritten.
 
    - **Option B: Claude Code Plugin** — `plugins/cubtoken/` ships the same hook as a Claude Code plugin, which resolves `ctk` at call time rather than baking in an absolute path — so `cargo clean` or moving the binary can't silently break it:
 
@@ -105,7 +105,9 @@ cubtoken installs as a **post-tool hook**. The tool runs normally (a local file 
 
    Prints a per-tool table (`tokens in / out / saved / saved%`) plus a lifetime `TOTAL`, aggregated across every session ledger in `.cubtoken/` (which self-ignores via its own `.gitignore`, so it never shows up in `git status`). `no savings recorded yet` means no compressible tool calls have run in a post-`init` session — re-check step 3.
 
-   Counts are estimates (~3.5 chars/token), not tokenizer output. The cost side is reported too: **follow-up `Read(offset/limit)` calls into compressed files** — their count, their estimated tokens, and their tool time — followed by an **estimated net saved** line (gross savings minus refetched tokens). That net number is the one to trust; if it stalls, raise `read.threshold_tokens` so fewer files get skeletonized.
+   Counts are estimates (~3.5 chars/token), not tokenizer output. `ctk stats` keeps the legacy broad refetch total and separately reports **Net Context Saved**: gross Read savings minus high-confidence, causally attributable recovery Reads. Use `ctk stats --json` for automation. If net savings stalls, raise `read.threshold_tokens` so fewer files get skeletonized.
+
+   `ctk adaptive status` shows the local governor's samples and recommendation; `ctk adaptive explain <file>` shows the effective threshold for one file; `ctk adaptive reset` clears learned policy while retaining historical statistics. `ctk output status` reports the opt-in output profile and its estimated visible response tokens.
 
 7. **Tune (optional).** Edit `.cubtoken.toml` to compress more or less — raise `read.threshold_tokens`, add globs to `read.never_compress`, or set `bash.enabled = true` if you do not run rtk. See [Configuration](#configuration-cubtokentoml-overlaid-on-configcubtokenconfigtoml) below. Config is re-read on every tool call, so edits apply to the next one — no restart needed (only installing the hook with `ctk init` requires a restart).
 
@@ -162,6 +164,8 @@ Codex CLI and Antigravity can't host cubtoken today: neither one's post-tool hoo
 | `glob.max_paths` | `50` | Listings at or under this pass through |
 | `bash.enabled` | `false` | Minimal ANSI/progress strip; leave off if you use rtk |
 | `stats.ledger` | `true` | Record savings to `.cubtoken/` for `ctk stats` |
+| `adaptive.mode` | `off` | `off`, `observe`, or conservative one-way `safe` Read backoff |
+| `output.mode` | `default` | `default` or opt-in `concise` SessionStart instruction |
 
 Config is layered: built-in defaults, then the global `~/.config/cubtoken/config.toml`, then the project `.cubtoken.toml` in the directory the agent is running in (project wins on conflicts). The hook reads these per tool call against the session's working directory, so a single global install still honors each project's own `.cubtoken.toml` — drop one in any repo to tune it there.
 
@@ -181,7 +185,7 @@ Tool output and repository content remain untrusted input; compression is not a 
    ctk uninstall
    ```
 
-   Use `ctk uninstall --global` for a global install. It strips only cubtoken's `PostToolUse` entry, leaves every other hook and setting untouched, and cleans up the empty `hooks` scaffolding it created. If you installed globally but run a bare `ctk uninstall`, it tells you where the hook actually lives instead of reporting nothing found. Restart Claude Code afterwards — hooks are snapshotted at session start.
+   Use `ctk uninstall --global` for a global install. It strips only cubtoken's entries for every event, leaves every other hook and setting untouched, and cleans up the empty `hooks` scaffolding it created. If you installed globally but run a bare `ctk uninstall`, it tells you where the hook actually lives instead of reporting nothing found. Restart Claude Code afterwards — hooks are snapshotted at session start.
 
    `uninstall` only touches settings files. If you installed the **plugin** instead of running `ctk init`, remove it through Claude Code's own `/plugin` management rather than here — the plugin's hook lives in the plugin, not in your settings.
 
@@ -190,7 +194,16 @@ Tool output and repository content remain untrusted input; compression is not a 
 
 ## Development
 
-TDD throughout; fixtures in `tests/fixtures/` are real recorded hook payloads (see `ctk record`). Gate: `cargo fmt --check && cargo clippy --locked --workspace --all-targets --all-features -- -D warnings && cargo test --locked --workspace --all-features && cargo audit --deny warnings`.
+### Compression test plan
+
+1. Run `cargo test --locked -p ctk-compress -p ctk-sitter` while changing a representation. These tests enforce the 30% savings gate, response shape, parser fallback, verbatim displayed lines, and complete elision ranges.
+2. Run `cargo test --locked -p ctk-hook` while changing dispatch, ledger, or adaptive behavior. Recorded fixtures cover Claude's payload contract; integration tests cover targeted/edited-file pass-through, lock contention, one-time recovery escapes, and concurrent state writes.
+3. If Claude changes a payload, capture it with `ctk record`, redact it, add it under `tests/fixtures/`, and write the contract test before changing the parser.
+4. Before release, run `cargo fmt --check && cargo clippy --locked --workspace --all-targets --all-features -- -D warnings && cargo test --locked --workspace --all-features && cargo audit --deny warnings`. Then smoke-test a fresh Claude session: one large untouched Read compresses, its targeted refetch does not, an edited file stays untouched, and `ctk stats --json` records the result.
+
+Compression is acceptable only when every omitted line is covered by an advertised range, every displayed line is verbatim, safety failures pass through, and the replacement is at least 30% smaller. Compare the same Rust, TSX, Python, Go, and unparseable samples before and after quality changes; percentages are evidence, not golden tests.
+
+Fixtures in `tests/fixtures/` are real recorded hook payloads. Do not commit unredacted recordings.
 
 Layout beyond the Rust workspace:
 
