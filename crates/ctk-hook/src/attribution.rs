@@ -125,6 +125,33 @@ mod tests {
         );
     }
 
+    /// The backstop behind `is_protected`. In production `dispatch` returns
+    /// before attribution for any edited file, so this is unreachable today —
+    /// but it is what keeps an edited file out of policy training if that
+    /// gate is ever relaxed, so its contract is pinned here directly.
+    #[test]
+    fn an_intervening_edit_is_never_trainable() {
+        let range = ElidedRange {
+            start_line: 30,
+            end_line: 31,
+        };
+        // Everything else says High: later batch, overlapping, unchanged.
+        assert_eq!(
+            classify_targeted(&decision(), 2, 5, true, true, &range),
+            None
+        );
+        assert_eq!(classify_full_repeat(&decision(), 2, 5, true, true), None);
+        // Sanity: the same inputs without the edit are High.
+        assert_eq!(
+            classify_targeted(&decision(), 2, 5, true, false, &range),
+            Some(Confidence::High)
+        );
+        assert_eq!(
+            classify_full_repeat(&decision(), 2, 5, true, false),
+            Some(Confidence::High)
+        );
+    }
+
     #[test]
     fn changed_or_non_overlapping_content_is_not_trainable() {
         let range = ElidedRange {

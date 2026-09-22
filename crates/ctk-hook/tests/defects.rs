@@ -190,3 +190,58 @@ fn stop_does_not_walk_the_ledgers_when_statistics_are_off() {
         "a Stop with statistics on must still rebuild adaptive state"
     );
 }
+
+/// A file the model edited must never train the policy, even when its content
+/// on disk is unchanged. Two layers enforce this: `dispatch` returns before
+/// attribution for any protected file, and `classify_*` treats an intervening
+/// edit as untrainable. `changed_content_and_intervening_edits_cannot_train_policy`
+/// looks like it covers this, but its file content changes first, so the
+/// fingerprint mismatch alone keeps confidence at Low and neither layer is
+/// exercised. Here only the edit stands between the recovery and High.
+#[test]
+fn an_edit_with_unchanged_content_cannot_train_policy() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("large.rs");
+    std::fs::write(&path, source()).unwrap();
+    let session = "edit-unchanged";
+    let cfg = Config::default();
+    let data = temp.path().join(".cubtoken");
+
+    let turn = serde_json::json!({
+        "hook_event_name": "UserPromptSubmit", "cwd": temp.path(), "session_id": session
+    })
+    .to_string();
+    let batch = serde_json::json!({
+        "hook_event_name": "PostToolBatch", "cwd": temp.path(), "session_id": session
+    })
+    .to_string();
+    run_hook(&turn, &cfg);
+    assert!(run_hook(&full_read(&path, temp.path(), session), &cfg).is_some());
+    let decision = Ledger::open(&data, session)
+        .decisions()
+        .last()
+        .cloned()
+        .unwrap();
+    run_hook(&batch, &cfg);
+
+    // The edit arrives; the content on disk does not change.
+    assert!(run_hook(&edit(&path, temp.path(), session), &cfg).is_none());
+
+    let start = decision.elided_ranges[0].start_line;
+    let targeted = serde_json::json!({
+        "hook_event_name": "PostToolUse", "tool_name": "Read", "session_id": session,
+        "cwd": temp.path(), "tool_input": {"file_path": &path, "offset": start, "limit": 1},
+        "tool_response": {"file": {"filePath": &path, "content": "    let value = 42;\n",
+                                   "startLine": start, "numLines": 1}}
+    })
+    .to_string();
+    assert!(run_hook(&targeted, &cfg).is_none());
+
+    assert!(
+        !Ledger::open(&data, session)
+            .recoveries()
+            .iter()
+            .any(|recovery| recovery.confidence == Some(ctk_hook::ledger::Confidence::High)),
+        "a recovery on an edited file must never be high confidence"
+    );
+}

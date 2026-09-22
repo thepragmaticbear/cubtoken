@@ -500,3 +500,69 @@ fn refresh_sums_only_high_confidence_recoveries_for_the_matching_decision() {
         "only the two high-confidence recoveries naming this decision may count"
     );
 }
+
+/// Recoveries attribute to decisions within one session ledger, because
+/// `record_targeted_recovery` looks the decision up in that session's own
+/// ledger. `refresh` must keep that scope when it aggregates: a recovery in
+/// one session must not be charged to a decision in another that happens to
+/// share its id. Ids come from the host's `tool_use_id` or
+/// `"{session_id}:{sequence}"`, so a collision is not expected today — which
+/// is exactly why nothing else would notice this property breaking.
+#[test]
+fn refresh_attributes_recoveries_only_within_their_own_session() {
+    use ctk_hook::ledger::{CompressionDecision, ElidedRange, Recovery, RecoveryKind};
+
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path().join(".cubtoken");
+    let decision = |recorded_at_ms| CompressionDecision {
+        decision_id: "shared-id".to_string(),
+        turn: 1,
+        batch: 1,
+        sequence: 1,
+        recorded_at_ms,
+        file_identity: "/a.rs".to_string(),
+        content_fingerprint: "v1".to_string(),
+        language: "rust".to_string(),
+        strategy: "skeleton".to_string(),
+        profile: "default".to_string(),
+        tokens_in: 10_000,
+        tokens_out: 1_000,
+        elided_ranges: vec![ElidedRange {
+            start_line: 2,
+            end_line: 90,
+        }],
+    };
+
+    let mut first = Ledger::open(&dir, "first");
+    first.note_decision(decision(1_000));
+    first.note_recovery(Recovery {
+        path: "/a.rs".to_string(),
+        tokens: 500,
+        duration_ms: 0,
+        decision_id: Some("shared-id".to_string()),
+        kind: Some(RecoveryKind::Targeted),
+        confidence: Some(Confidence::High),
+        turn: Some(1),
+        batch: Some(2),
+    });
+    drop(first);
+
+    // Same decision id, different session, no recovery of its own.
+    let mut second = Ledger::open(&dir, "second");
+    second.note_decision(decision(2_000));
+    drop(second);
+
+    ctk_hook::adaptive_state::reset(&dir, 0).unwrap();
+    let state = ctk_hook::adaptive_state::refresh(&dir, 3_000);
+    let key = ctk_hook::adaptive::bucket_key("rust", 10_000, "skeleton");
+    let recovered: Vec<usize> = state.buckets[&key]
+        .outcomes
+        .iter()
+        .map(|outcome| outcome.recovery_tokens)
+        .collect();
+    assert_eq!(
+        recovered,
+        vec![500, 0],
+        "the second session's decision must not inherit the first session's recovery"
+    );
+}
