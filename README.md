@@ -170,7 +170,7 @@ Only high-confidence recoveries train the policy. A recovery is high confidence 
 
 **Cost.** In `safe` mode, each Read adds a small state lookup. Adaptive state is rebuilt from **every** session ledger in `.cubtoken/` at the end of each turn. Nothing prunes that directory, so the rebuild gets slower as a project accumulates sessions.
 
-**Status.** `safe` has not been validated. Attribution depends on Claude Code delivering its tool-batch and turn events, and that hasn't yet been confirmed in a live session. It also hasn't been shown that the governor reduces total token use. Leave it off unless you're evaluating it.
+**Status.** `safe` has not been validated. Attribution depends on Claude Code delivering its tool-batch and turn events, and that hasn't yet been confirmed in a live session. It also hasn't been shown that the governor reduces total token use. Leave it off unless you're evaluating it. The evaluation contract is [ADAPTIVE_GOVERNOR_EVALUATION_SPEC.md](ADAPTIVE_GOVERNOR_EVALUATION_SPEC.md), and the current verdict and measurements are in [tests/evaluation/RESULTS.md](tests/evaluation/RESULTS.md). On one Apple M5, safe mode added about 0.17 ms p95 per compressed Read, and the per-turn rebuild took about 6 ms at 10,000 ledger records, which is over its 5 ms target.
 
 ## Configuration (`.cubtoken.toml`, overlaid on `~/.config/cubtoken/config.toml`)
 
@@ -233,6 +233,17 @@ Compression is acceptable only when every omitted line is covered by an advertis
 
 Fixtures in `tests/fixtures/` are real recorded hook payloads. Do not commit unredacted recordings.
 
+### Governor evaluation
+
+The adaptive governor has its own harness. The runbook in [tests/evaluation/README.md](tests/evaluation/README.md) covers the four comparison arms, the task matrix, run records, and the host usage mapping. Two checks run locally with no model or network:
+
+```sh
+python3 scripts/evaluate_governor.py --self-test
+cargo test --release -p ctk-hook --test performance -- --ignored --nocapture
+```
+
+The analysis script refuses to pool records that aren't comparable, so fix any data errors it reports before reading its results. The performance drivers report min, median, and p95 over at least 100 samples. Fewer than that turns "p95" into the maximum.
+
 Layout beyond the Rust workspace:
 
 | Path | What |
@@ -240,6 +251,8 @@ Layout beyond the Rust workspace:
 | `crates/` | `ctk-cli` → `ctk-hook` → `ctk-compress` → `ctk-sitter`, strictly layered |
 | `plugins/cubtoken/` | The Claude Code plugin (manifest, `hooks/hooks.json`, `bin/ctk-hook` wrapper) |
 | `.claude-plugin/marketplace.json` | Makes this repo installable as a plugin marketplace |
+| `scripts/evaluate_governor.py` | Validates governor evaluation run records and writes the report. Standard library only. |
+| `tests/evaluation/` | Evaluation task matrix, independent success checks, runbook, and validation receipt |
 
 Contributions are welcome — the gate above is what CI enforces, so run it before opening a PR.
 
