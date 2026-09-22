@@ -121,8 +121,17 @@ fn notebook_edit_protects_notebook_path() {
     });
     assert!(run_hook(&edit.to_string(), &cfg).is_none());
 
+    // Edits are recorded under the normalized identity the Read path checks,
+    // not the raw string. On Unix the two coincide for this absolute path; on
+    // Windows `/repo/...` has no drive letter, so it is not absolute, and it
+    // normalizes to `C:\repo\...`. Asserting on the raw string only held on
+    // Unix.
     let ledger = Ledger::open(&dir.path().join(".cubtoken"), "notebook-e2e");
-    assert!(ledger.is_protected(path));
+    let identity = ctk_hook::ledger::normalize_file_identity(dir.path(), path);
+    assert!(
+        ledger.is_protected(&identity),
+        "NotebookEdit must protect {identity}"
+    );
 }
 
 #[test]

@@ -1,3 +1,4 @@
+mod adaptive;
 mod doctor;
 mod init;
 mod stats;
@@ -42,10 +43,40 @@ enum Cmd {
         #[arg(long)]
         global: bool,
     },
-    /// Report token savings from the local ledger
-    Stats,
+    /// Report estimated token savings from the local ledger
+    Stats {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Inspect or reset the Read governor
+    Adaptive {
+        #[command(subcommand)]
+        cmd: AdaptiveCmd,
+    },
+    /// Inspect the opt-in output profile
+    Output {
+        #[command(subcommand)]
+        cmd: OutputCmd,
+    },
     /// Check installation health
     Doctor,
+}
+
+#[derive(Subcommand)]
+enum AdaptiveCmd {
+    Status {
+        #[arg(long)]
+        json: bool,
+    },
+    Explain {
+        file: String,
+    },
+    Reset,
+}
+
+#[derive(Subcommand)]
+enum OutputCmd {
+    Status,
 }
 
 fn main() {
@@ -70,7 +101,39 @@ fn main() {
                 std::process::exit(1);
             }
         }
-        Cmd::Stats => stats::run(),
+        Cmd::Stats { json } => stats::run(json),
+        Cmd::Adaptive { cmd } => {
+            let result = match cmd {
+                AdaptiveCmd::Status { json } => adaptive::status(json),
+                AdaptiveCmd::Explain { file } => adaptive::explain(&file),
+                AdaptiveCmd::Reset => adaptive::reset(),
+            };
+            if let Err(error) = result {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        }
+        Cmd::Output {
+            cmd: OutputCmd::Status,
+        } => {
+            let root = project_root();
+            let cfg = match ctk_hook::Config::try_load_for(&root) {
+                Ok(cfg) => cfg,
+                Err(error) => {
+                    eprintln!("output status failed: {error}");
+                    std::process::exit(1);
+                }
+            };
+            let visible = ctk_hook::ledger::Ledger::load_all(&root.join(".cubtoken"))
+                .iter()
+                .fold(0usize, |total, ledger| {
+                    total.saturating_add(ledger.visible_output_tokens())
+                });
+            println!("output profile: {:?}", cfg.output.mode);
+            println!(
+                "estimated visible assistant output: {visible} tokens (not authoritative API usage)"
+            );
+        }
     }
 }
 
