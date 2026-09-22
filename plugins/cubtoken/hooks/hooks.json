@@ -1,5 +1,7 @@
 {
   "hooks": {
+    "SessionStart": [{"hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/ctk-hook"}]}],
+    "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/ctk-hook"}]}],
     "PostToolUse": [
       {
         "matcher": "Read|Grep|Glob|Bash|Edit|Write|NotebookEdit",
@@ -10,6 +12,10 @@
           }
         ]
       }
-    ]
+    ],
+    "PostToolBatch": [{"hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/ctk-hook"}]}],
+    "Stop": [{"hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/ctk-hook"}]}],
+    "StopFailure": [{"hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/ctk-hook"}]}],
+    "SessionEnd": [{"hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/ctk-hook"}]}]
   }
 }

@@ -139,3 +139,50 @@ fn wrapper_forwards_to_ctk_on_path() {
         "PostToolUse"
     );
 }
+
+/// Event parity, checked against what `ctk init` actually writes rather than a
+/// mirrored constant. Attribution depends on `PostToolBatch` for its batch
+/// boundary and on `UserPromptSubmit` for its turn boundary: a plugin install
+/// that silently lacks either one downgrades every recovery to a lower
+/// confidence, so the two install paths must subscribe to the same events.
+#[test]
+fn plugin_events_match_init() {
+    let dir = tempfile::tempdir().unwrap();
+    assert_cmd::Command::cargo_bin("ctk")
+        .unwrap()
+        .arg("init")
+        .current_dir(dir.path())
+        .env("HOME", dir.path())
+        .assert()
+        .success();
+
+    let installed = json(&dir.path().join(".claude/settings.local.json"));
+    let plugin = json(&plugin_dir().join("hooks/hooks.json"));
+
+    let names = |value: &serde_json::Value| {
+        let mut events: Vec<String> = value["hooks"]
+            .as_object()
+            .expect("hooks is not an object")
+            .keys()
+            .cloned()
+            .collect();
+        events.sort();
+        events
+    };
+    assert_eq!(
+        names(&installed),
+        names(&plugin),
+        "plugin hooks.json subscribes to different events than `ctk init`"
+    );
+
+    // Only PostToolUse is filtered, and both paths must filter it identically.
+    for event in names(&plugin) {
+        let installed_matcher = installed["hooks"][&event][0].get("matcher");
+        let plugin_matcher = plugin["hooks"][&event][0].get("matcher");
+        assert_eq!(
+            installed_matcher, plugin_matcher,
+            "matcher for {event} differs between `ctk init` and the plugin"
+        );
+    }
+    assert_eq!(plugin["hooks"]["PostToolUse"][0]["matcher"], MATCHER);
+}

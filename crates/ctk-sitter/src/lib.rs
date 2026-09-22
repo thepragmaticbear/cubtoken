@@ -22,6 +22,14 @@ pub struct Skeleton {
     pub rendered: String,
     /// (1-based line number, verbatim text) for every source line shown.
     pub shown_lines: Vec<(usize, String)>,
+    /// Source ranges hidden behind the rendered `[Lx-Ly]` markers.
+    pub elided_ranges: Vec<LineRange>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct LineRange {
+    pub start_line: usize,
+    pub end_line: usize,
 }
 
 pub fn lang_for_path(path: &str) -> Option<Lang> {
@@ -58,6 +66,7 @@ pub fn skeleton(src: &str, lang: Lang) -> Option<Skeleton> {
         lines: src.lines().collect(),
         out: String::new(),
         shown: Vec::new(),
+        elided: Vec::new(),
         decls: 0,
         lang,
         covered: None,
@@ -72,6 +81,7 @@ pub fn skeleton(src: &str, lang: Lang) -> Option<Skeleton> {
     Some(Skeleton {
         rendered: b.out,
         shown_lines: b.shown,
+        elided_ranges: b.elided,
     })
 }
 
@@ -259,6 +269,7 @@ struct Builder<'a> {
     lines: Vec<&'a str>,
     out: String,
     shown: Vec<(usize, String)>,
+    elided: Vec<LineRange>,
     decls: usize,
     lang: Lang,
     /// Highest 0-based row already shown or covered by an elision marker.
@@ -316,6 +327,10 @@ impl<'a> Builder<'a> {
                 "… +{} more imports [L{first_hidden}-L{last}]",
                 group.len() - shown
             ));
+            self.elided.push(LineRange {
+                start_line: first_hidden,
+                end_line: last,
+            });
             self.covered = Some(last - 1);
         }
     }
@@ -433,6 +448,16 @@ impl<'a> Builder<'a> {
             }
             None => (self.out.len(), from),
         };
+        if self.open_marker.is_some() {
+            if let Some(range) = self.elided.last_mut() {
+                range.end_line = to;
+            }
+        } else {
+            self.elided.push(LineRange {
+                start_line: from,
+                end_line: to,
+            });
+        }
         self.out
             .push_str(&format!("{GUTTER}  … [L{start}-L{to}]\n"));
         self.open_marker = Some((offset, start));
@@ -446,5 +471,31 @@ mod parser_safety_tests {
     #[test]
     fn nul_bytes_fail_open_before_parsing() {
         assert!(skeleton("fn main() {\0}", Lang::Rust).is_none());
+    }
+}
+
+#[cfg(test)]
+mod range_tests {
+    use super::*;
+
+    #[test]
+    fn structured_ranges_cover_every_non_verbatim_source_line() {
+        let source = format!(
+            "fn large() {{\n{}\n}}\n",
+            "    let value = 1;\n".repeat(100)
+        );
+        let skeleton = skeleton(&source, Lang::Rust).unwrap();
+        let shown: std::collections::HashSet<_> =
+            skeleton.shown_lines.iter().map(|(line, _)| *line).collect();
+        for line in 1..=source.lines().count() {
+            assert!(
+                shown.contains(&line)
+                    || skeleton
+                        .elided_ranges
+                        .iter()
+                        .any(|range| range.start_line <= line && line <= range.end_line),
+                "line {line} is neither shown nor structurally elided"
+            );
+        }
     }
 }

@@ -1,11 +1,34 @@
 use ctk_hook::{run_hook, Config};
 
+/// A writable project for recorded payloads to run in.
+///
+/// Fixtures carry the recording machine's `cwd` (`/private/tmp/stk-capture`).
+/// The session ledger lives under that project root, and a Read passes through
+/// whenever its ledger can't be opened: without edit-protection state it
+/// mustn't compress. Linux has no `/private` and can't create one, so on CI every
+/// Read fixture passed through. `large_read_is_compressed_with_escape_hatch`
+/// failed, and the pass-through tests below passed for the wrong reason.
+fn project() -> &'static std::path::Path {
+    // ponytail: one temp dir per test binary, never removed (statics don't drop).
+    // Swap for a per-test TempDir if isolation between these tests ever matters.
+    static DIR: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| tempfile::tempdir().unwrap()).path()
+}
+
 fn fixture(name: &str) -> String {
-    std::fs::read_to_string(format!(
+    static SESSION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let raw = std::fs::read_to_string(format!(
         "{}/../../tests/fixtures/{name}.json",
         env!("CARGO_MANIFEST_DIR")
     ))
-    .unwrap()
+    .unwrap();
+    let mut payload: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    payload["session_id"] = serde_json::json!(format!(
+        "fixture-{}",
+        SESSION.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    payload["cwd"] = serde_json::json!(project());
+    payload.to_string()
 }
 
 #[test]
@@ -169,4 +192,21 @@ fn run_hook_auto_loads_project_config_from_cwd() {
         .unwrap();
     assert!(!stdout.contains('\u{1b}'));
     assert!(stdout.contains("done"));
+}
+
+#[test]
+fn output_profile_is_opt_in_and_only_emits_at_session_start() {
+    let start = serde_json::json!({"hook_event_name": "SessionStart"}).to_string();
+    assert!(run_hook(&start, &Config::default()).is_none());
+
+    let cfg = Config::load_from(None, Some("[output]\nmode = \"concise\""));
+    let out = run_hook(&start, &cfg).expect("concise profile should inject once");
+    let value: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(value["hookSpecificOutput"]["hookEventName"], "SessionStart");
+    assert!(value["hookSpecificOutput"]["additionalContext"]
+        .as_str()
+        .is_some_and(|instruction| instruction.contains("Do not narrate routine tool use")));
+
+    let turn = serde_json::json!({"hook_event_name": "UserPromptSubmit"}).to_string();
+    assert!(run_hook(&turn, &cfg).is_none());
 }

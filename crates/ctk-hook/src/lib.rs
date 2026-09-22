@@ -1,9 +1,12 @@
+pub mod adaptive;
+pub mod adaptive_state;
+pub mod attribution;
 pub mod ledger;
 pub mod protocol;
 
 pub use ctk_compress::config::project_root;
 pub use ctk_compress::Config;
-pub use protocol::{HookOutput, HookPayload};
+pub use protocol::{HookEnvelope, HookEvent, HookOutput, HookPayload};
 
 use ledger::Ledger;
 
@@ -12,8 +15,7 @@ use ledger::Ledger;
 /// Every error path returns `None` — the fail-open invariant.
 pub fn run_hook(stdin: &str, cfg: &Config) -> Option<String> {
     let payload: HookPayload = serde_json::from_str(stdin).ok()?;
-    let updated = dispatch(&payload, cfg)?;
-    serde_json::to_string(&HookOutput::updated(updated)).ok()
+    emit_for_event(&payload, cfg)
 }
 
 /// Production entry point: like [`run_hook`] but loads layered config from the
@@ -23,16 +25,166 @@ pub fn run_hook(stdin: &str, cfg: &Config) -> Option<String> {
 pub fn run_hook_auto(stdin: &str) -> Option<String> {
     let payload: HookPayload = serde_json::from_str(stdin).ok()?;
     let cfg = Config::try_load_for(std::path::Path::new(&payload.cwd)).ok()?;
-    let updated = dispatch(&payload, &cfg)?;
-    serde_json::to_string(&HookOutput::updated(updated)).ok()
+    emit_for_event(&payload, &cfg)
+}
+
+const CONCISE_OUTPUT_INSTRUCTION: &str = "Do not narrate routine tool use or restate tool output.\nAfter successful work, report only material changes, failures,\nand required next actions unless the user asks for more detail.";
+
+fn emit_for_event(payload: &HookPayload, cfg: &Config) -> Option<String> {
+    let output = match payload.event() {
+        HookEvent::SessionStart if cfg.output.mode == ctk_compress::config::OutputMode::Concise => {
+            HookOutput::additional_context(CONCISE_OUTPUT_INSTRUCTION)
+        }
+        HookEvent::PostToolUse => HookOutput::updated(dispatch(payload, cfg)?),
+        HookEvent::UserPromptSubmit => {
+            if cfg.stats.ledger {
+                ledger_for(payload).note_turn_start();
+            }
+            return None;
+        }
+        HookEvent::PostToolBatch => {
+            if cfg.stats.ledger {
+                ledger_for(payload).note_batch_end();
+            }
+            return None;
+        }
+        HookEvent::Stop => {
+            if cfg.stats.ledger {
+                if let Some(message) = payload.last_assistant_message.as_deref() {
+                    ledger_for(payload)
+                        .note_visible_output(ctk_compress::estimate::est_tokens(message));
+                }
+            }
+            refresh_adaptive(payload, cfg);
+            return None;
+        }
+        // These events only finalize state in later adaptive phases. They must
+        // remain silent even when the host adds fields we do not understand.
+        HookEvent::SessionEnd => {
+            refresh_adaptive(payload, cfg);
+            return None;
+        }
+        HookEvent::StopFailure | HookEvent::SessionStart | HookEvent::Unknown => {
+            return None;
+        }
+    };
+    serde_json::to_string(&output).ok()
 }
 
 const EDIT_TOOLS: &[&str] = &["Edit", "Write", "NotebookEdit"];
 
 fn ledger_for(payload: &HookPayload) -> Ledger {
-    let dir =
-        ctk_compress::config::project_root(std::path::Path::new(&payload.cwd)).join(".cubtoken");
-    Ledger::open(&dir, &payload.session_id)
+    Ledger::open(&data_dir_for(payload), &payload.session_id)
+}
+
+fn data_dir_for(payload: &HookPayload) -> std::path::PathBuf {
+    ctk_compress::config::project_root(std::path::Path::new(&payload.cwd)).join(".cubtoken")
+}
+
+fn refresh_adaptive(payload: &HookPayload, cfg: &Config) {
+    // `refresh` walks and parses every session ledger in the project, and it
+    // learns only from ledger-recorded decisions. With statistics off there is
+    // nothing for it to find, so the walk is pure cost on every turn.
+    if cfg.adaptive.mode != ctk_compress::config::AdaptiveMode::Off && cfg.stats.ledger {
+        let _ = adaptive_state::refresh(&data_dir_for(payload), unix_millis());
+    }
+}
+
+/// The threshold to compress at, given a Read that has already been parsed.
+///
+/// Takes `ParsedRead` rather than re-deriving the bucket from the payload: the
+/// language and strategy it buckets on come from a tree-sitter parse, and the
+/// compressor needs that same parse. Passing it through is what keeps safe
+/// mode to one parse per Read instead of two.
+fn effective_read_threshold(
+    payload: &HookPayload,
+    cfg: &Config,
+    parsed: &ctk_compress::read::ParsedRead<'_>,
+) -> usize {
+    if cfg.adaptive.mode != ctk_compress::config::AdaptiveMode::Safe {
+        return cfg.read.threshold_tokens;
+    }
+    let state = adaptive_state::load(&data_dir_for(payload), unix_millis());
+    let key = adaptive::bucket_key(parsed.language(), parsed.tokens_in(), parsed.strategy());
+    adaptive_state::recommendation(&state, &key).effective_threshold(cfg.read.threshold_tokens)
+}
+
+fn record_targeted_recovery(ledger: &mut Ledger, payload: &HookPayload, identity: &str) {
+    let Some(decision) = ledger.latest_decision(identity).cloned() else {
+        return;
+    };
+    let Some(returned) = attribution::returned_range(&payload.tool_input, &payload.tool_response)
+    else {
+        return;
+    };
+    let confidence = attribution::classify_targeted(
+        &decision,
+        ledger.current_turn(),
+        ledger.current_batch(),
+        fingerprint_matches(identity, &decision),
+        ledger.has_edit_after(&decision),
+        &returned,
+    );
+    if let Some(confidence) = confidence {
+        ledger.note_recovery(ledger::Recovery {
+            path: identity.to_string(),
+            tokens: ctk_compress::read::response_tokens(&payload.tool_response),
+            duration_ms: payload.duration_ms.unwrap_or(0),
+            decision_id: Some(decision.decision_id),
+            kind: Some(ledger::RecoveryKind::Targeted),
+            confidence: Some(confidence),
+            turn: Some(ledger.current_turn()),
+            batch: Some(ledger.current_batch()),
+        });
+    }
+}
+
+fn record_full_repeat_escape(ledger: &mut Ledger, payload: &HookPayload, identity: &str) -> bool {
+    let Some(decision) = ledger.latest_decision(identity).cloned() else {
+        return false;
+    };
+    if ledger.recoveries().iter().any(|recovery| {
+        recovery.decision_id.as_deref() == Some(decision.decision_id.as_str())
+            && recovery.kind == Some(ledger::RecoveryKind::FullRepeat)
+    }) {
+        return false;
+    }
+    let confidence = attribution::classify_full_repeat(
+        &decision,
+        ledger.current_turn(),
+        ledger.current_batch(),
+        fingerprint_matches(identity, &decision),
+        ledger.has_edit_after(&decision),
+    );
+    let Some(confidence) = confidence else {
+        return false;
+    };
+    ledger.note_recovery(ledger::Recovery {
+        path: identity.to_string(),
+        tokens: ctk_compress::read::response_tokens(&payload.tool_response),
+        duration_ms: payload.duration_ms.unwrap_or(0),
+        decision_id: Some(decision.decision_id),
+        kind: Some(ledger::RecoveryKind::FullRepeat),
+        confidence: Some(confidence),
+        turn: Some(ledger.current_turn()),
+        batch: Some(ledger.current_batch()),
+    });
+    confidence == ledger::Confidence::High
+}
+
+fn fingerprint_matches(identity: &str, decision: &ledger::CompressionDecision) -> bool {
+    std::fs::read_to_string(identity)
+        .ok()
+        .is_some_and(|content| {
+            ctk_compress::read::content_fingerprint(&content) == decision.content_fingerprint
+        })
+}
+
+fn unix_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
+        .unwrap_or(0)
 }
 
 /// Per-tool compressor dispatch. Returns the replacement `tool_response`
@@ -47,42 +199,99 @@ fn dispatch(payload: &HookPayload, cfg: &Config) -> Option<serde_json::Value> {
             "file_path"
         };
         if let Some(path) = payload.tool_input.get(path_key).and_then(|v| v.as_str()) {
-            ledger_for(payload).note_edit(path);
+            let identity =
+                ledger::normalize_file_identity(std::path::Path::new(&payload.cwd), path);
+            ledger_for(payload).note_edit_identity(&identity);
         }
         return None;
     }
     match payload.tool_name.as_str() {
         "Read" => {
             let mut ledger = ledger_for(payload);
+            if !ledger.lock_acquired() {
+                return None;
+            }
             let path = payload
                 .tool_input
                 .get("file_path")
                 .and_then(|v| v.as_str())?;
-            if ledger.is_protected(path) {
+            let response_path = payload
+                .tool_response
+                .pointer("/file/filePath")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or(path);
+            let identity =
+                ledger::normalize_file_identity(std::path::Path::new(&payload.cwd), response_path);
+            if ledger.is_protected(&identity) || ledger.is_protected(path) {
                 return None;
             }
-            // A targeted Read into a file we already compressed is the model
-            // buying back what we elided — the cost side of the savings
-            // number. Record it before passing through.
-            if payload.tool_input.get("offset").is_some()
-                || payload.tool_input.get("limit").is_some()
-            {
-                if cfg.stats.ledger && ledger.was_compressed(path) {
-                    ledger.note_refetch(
-                        path,
-                        ctk_compress::read::response_tokens(&payload.tool_response),
-                        payload.duration_ms.unwrap_or(0),
-                    );
+            let targeted = payload.tool_input.get("offset").is_some()
+                || payload.tool_input.get("limit").is_some();
+            if targeted {
+                if cfg.stats.ledger {
+                    let before = ledger.recoveries().len();
+                    record_targeted_recovery(&mut ledger, payload, &identity);
+                    // Preserve the original broad counter for historical stats.
+                    // Its unlabelled records are intentionally excluded from
+                    // adaptive learning and attributed recovery overhead.
+                    if before == ledger.recoveries().len()
+                        && (ledger.was_compressed(&identity) || ledger.was_compressed(path))
+                    {
+                        ledger.note_refetch(
+                            &identity,
+                            ctk_compress::read::response_tokens(&payload.tool_response),
+                            payload.duration_ms.unwrap_or(0),
+                        );
+                    }
                 }
                 return None;
             }
-            let outcome = ctk_compress::read::compress_read(
+            if cfg.stats.ledger && record_full_repeat_escape(&mut ledger, payload, &identity) {
+                return None;
+            }
+            let candidate = ctk_compress::read::read_candidate(
                 &payload.tool_input,
                 &payload.tool_response,
                 cfg,
             )?;
+            // Every recommendation only ever raises the threshold, so a Read
+            // already under the configured one cannot compress whatever the
+            // policy says. Bailing here keeps the parse off the common path.
+            if candidate.tokens_in() <= cfg.read.threshold_tokens {
+                return None;
+            }
+            let parsed = candidate.parse();
+            let threshold = effective_read_threshold(payload, cfg, &parsed);
+            let outcome = parsed.compress(&payload.tool_response, threshold)?;
             if cfg.stats.ledger {
-                ledger.note_saving("Read", Some(path), outcome.tokens_in, outcome.tokens_out);
+                let sequence = ledger.next_sequence();
+                let decision_id = payload
+                    .tool_use_id
+                    .clone()
+                    .unwrap_or_else(|| format!("{}:{sequence}", payload.session_id));
+                ledger.note_decision(ledger::CompressionDecision {
+                    decision_id,
+                    turn: ledger.current_turn(),
+                    batch: ledger.current_batch(),
+                    sequence,
+                    recorded_at_ms: unix_millis(),
+                    file_identity: identity,
+                    content_fingerprint: outcome.metadata.content_fingerprint,
+                    language: outcome.metadata.language,
+                    strategy: outcome.metadata.strategy,
+                    profile: "default".to_string(),
+                    tokens_in: outcome.tokens_in,
+                    tokens_out: outcome.tokens_out,
+                    elided_ranges: outcome
+                        .metadata
+                        .elided_ranges
+                        .into_iter()
+                        .map(|range| ledger::ElidedRange {
+                            start_line: range.start_line,
+                            end_line: range.end_line,
+                        })
+                        .collect(),
+                });
             }
             Some(outcome.updated_response)
         }
