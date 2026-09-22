@@ -151,8 +151,16 @@ edited by hand measures nothing. Do not count scored tasks as warm-up evidence.
 
 For each (task, repetition, arm) — 5 x 2 x 4 = 40 scored runs:
 
-1. **Fresh checkout** of the task revision into a new directory. Never reuse a
-   previous task's edits.
+1. **Fresh, history-stripped checkout** of the task revision into a new
+   directory:
+   ```sh
+   git -C $REFERENCE archive <revision> | tar -x -C <dir>
+   ```
+   Never reuse a previous task's edits. Strip the history: a clone checked out
+   at an older revision still holds later commits in its object store, so an
+   agent can read a fix out of `git log` instead of the source. `t3`'s answer
+   is literally a later commit in this repository, so a full clone would hand
+   it the solution.
 2. **Fresh agent session.** Never reuse a conversation.
 3. Write the arm's `.cubtoken.toml` into the checkout root, overwriting any that
    shipped with the repository.
@@ -171,6 +179,7 @@ For each (task, repetition, arm) — 5 x 2 x 4 = 40 scored runs:
    exported to the absolute path of this directory's `checks/`:
    ```sh
    export CHECKS=/path/to/cubtoken/tests/evaluation/checks
+   export REFERENCE=/path/to/a/full/clone   # history, for checks that need it
    ```
    Record its exit status and output. Checks are only ever introduced after the
    agent has stopped, so nothing in `checks/` is visible to it while it works.
@@ -231,7 +240,7 @@ unknown usage values are `null`, never `0`.
   "repetition": 1,
   "arm": "static",
   "source_revision": "fc6d7d5",
-  "cubtoken_revision": "<SHA of the frozen governor baseline>",
+  "cubtoken_revision": "<SHA of the commit under test — see RESULTS.md>",
   "config_hash": "sha256:<of the arm's .cubtoken.toml>",
   "checkpoint_hash": "sha256:<of adaptive-v1.json as restored>",
   "environment": {
@@ -293,7 +302,10 @@ Notes on the governor group:
 ## 7. Analysis
 
 ```sh
-python3 scripts/evaluate_governor.py --runs runs/*.jsonl --out tests/evaluation/report.md
+python3 scripts/evaluate_governor.py \
+  --runs runs/*.jsonl \
+  --expect-matrix tests/evaluation/tasks.json \
+  --out tests/evaluation/report.md
 ```
 
 The script is read-only: it launches nothing, installs nothing, changes no
@@ -302,6 +314,10 @@ configuration, and never writes to its inputs. It exits non-zero on data errors
 a task run against multiple source revisions, an ambiguous usage mapping — and
 reports them rather than pooling the records anyway. Repair the evaluation
 before interpreting any savings.
+
+Pass `--expect-matrix` so missing runs are measured against the manifest.
+Without it the expected matrix can only be inferred from the records that
+arrived, and a wholly absent task or repetition is invisible.
 
 It computes signed differences, so a regression shows as a negative number:
 

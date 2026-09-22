@@ -28,10 +28,12 @@ const SIZES: &[(usize, &str)] = &[
     (10_000, "large"),
 ];
 
-fn p95(mut samples: Vec<Duration>) -> Duration {
-    samples.sort();
-    // Nearest-rank p95: the smallest value at or above 95% of the samples.
-    let rank = ((samples.len() as f64) * 0.95).ceil() as usize;
+/// Nearest-rank percentile. Note the sample-count requirement: with n = 10,
+/// `ceil(10 * 0.95) = 10`, so "p95" would be the maximum sample and a single
+/// scheduling hiccup becomes the reported figure. Callers use n >= 100 so the
+/// 95th percentile is an actual percentile.
+fn percentile(samples: &[Duration], fraction: f64) -> Duration {
+    let rank = ((samples.len() as f64) * fraction).ceil() as usize;
     samples[rank.saturating_sub(1).min(samples.len() - 1)]
 }
 
@@ -84,7 +86,9 @@ struct Row {
     records: usize,
     category: &'static str,
     operation: &'static str,
+    median_ms: f64,
     p95_ms: f64,
+    min_ms: f64,
     iterations: usize,
 }
 
@@ -104,11 +108,17 @@ fn measure(
         body();
         samples.push(started.elapsed());
     }
+    samples.sort();
+    // Median and minimum sit beside p95: on a shared machine the tail carries
+    // scheduler noise, and a wide median-to-p95 gap says the measurement needs
+    // attention before the code does.
     rows.push(Row {
         records,
         category,
         operation,
-        p95_ms: ms(p95(samples)),
+        median_ms: ms(percentile(&samples, 0.50)),
+        p95_ms: ms(percentile(&samples, 0.95)),
+        min_ms: ms(samples[0]),
         iterations,
     });
 }
@@ -125,7 +135,8 @@ fn governor_p95_by_ledger_size() {
         // A second session file, so `load_all`/rebuild has more than one to walk.
         seed(&dir, "perf-b", records / 2);
 
-        let iterations = if records >= 5_000 { 40 } else { 200 };
+        // >= 100 everywhere: see `percentile`. Below that, p95 is the maximum.
+        let iterations = if records >= 5_000 { 100 } else { 200 };
 
         measure(
             &mut rows,
@@ -201,7 +212,7 @@ fn governor_p95_by_ledger_size() {
             },
         );
 
-        let rebuild_iterations = if records >= 5_000 { 10 } else { 40 };
+        let rebuild_iterations = if records >= 5_000 { 100 } else { 200 };
         measure(
             &mut rows,
             records,
@@ -215,12 +226,18 @@ fn governor_p95_by_ledger_size() {
     }
 
     println!("\n## Governor-only cost (p95)\n");
-    println!("| records | category | operation | p95 ms | iterations |");
-    println!("| --- | --- | --- | --- | --- |");
+    println!("| records | category | operation | min ms | median ms | p95 ms | iterations |");
+    println!("| --- | --- | --- | --- | --- | --- | --- |");
     for row in &rows {
         println!(
-            "| {} | {} | {} | {:.3} | {} |",
-            row.records, row.category, row.operation, row.p95_ms, row.iterations
+            "| {} | {} | {} | {:.3} | {:.3} | {:.3} | {} |",
+            row.records,
+            row.category,
+            row.operation,
+            row.min_ms,
+            row.median_ms,
+            row.p95_ms,
+            row.iterations
         );
     }
 

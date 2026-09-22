@@ -28,11 +28,9 @@ fn existing_resolution_is_unchanged() {
         ("tool.py", Some(Lang::Python)),
         ("cmd/main.go", Some(Lang::Go)),
     ] {
-        assert_eq!(
-            lang_for_path(path).is_some(),
-            expected.is_some(),
-            "{path} stopped resolving"
-        );
+        // Compare the variant, not merely that something resolved: `is_some()`
+        // on both sides is true for every row and guards nothing.
+        assert_eq!(lang_for_path(path), expected, "{path} changed grammar");
     }
     assert!(lang_for_path("notes.txt").is_none());
     assert!(lang_for_path("Makefile").is_none());

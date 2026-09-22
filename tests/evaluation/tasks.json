@@ -23,7 +23,7 @@
       "repository": "cubtoken",
       "revision": "fc6d7d5",
       "setup": [
-        "Clone the repository at the pinned revision into a fresh directory.",
+        "Export the pinned revision without history into a fresh directory: `git -C $REFERENCE archive <revision> | tar -x -C <dir>`.",
         "Write the arm's .cubtoken.toml into the checkout root, replacing any that ships with it.",
         "cargo build --locked so the first task turn is not dominated by a cold build."
       ],
@@ -42,7 +42,7 @@
       "repository": "cubtoken",
       "revision": "fc6d7d5",
       "setup": [
-        "Clone the repository at the pinned revision into a fresh directory.",
+        "Export the pinned revision without history into a fresh directory: `git -C $REFERENCE archive <revision> | tar -x -C <dir>`.",
         "Write the arm's .cubtoken.toml into the checkout root, replacing any that ships with it."
       ],
       "prompt": "A file the model edited earlier in a session is never compressed again. Write TRACE.md describing the complete path that produces that behaviour, from the hook's stdin payload to the pass-through decision. Name every function and file involved, in call order, and state where the protection is persisted and where it is read back.",
@@ -60,15 +60,15 @@
       "repository": "cubtoken",
       "revision": "2268a77",
       "setup": [
-        "Clone the repository at the pinned revision (the commit immediately before the upstream fix) into a fresh directory.",
+        "Export the pinned revision WITHOUT history into a fresh directory: `git -C $REFERENCE archive 2268a77 | tar -x -C <dir>`. A full clone would carry the fix commit d6ccb0f in its object store, and the agent could read the answer from git log rather than from the source.",
         "Write the arm's .cubtoken.toml into the checkout root.",
         "cargo build --locked."
       ],
       "prompt": "Run from any subdirectory of a project, `ctk stats` reports no savings even when the hook has recorded them, and `ctk doctor` fails to find the installed hook and leaves a stray .cubtoken directory behind. Both commands should operate on the project the subdirectory belongs to. Fix this.",
       "time_limit_ms": 1800000,
       "check": {
-        "command": "git checkout d6ccb0f -- crates/ctk-cli/tests/stats.rs crates/ctk-cli/tests/init.rs && cargo test --locked -p ctk-cli",
-        "independent": "Restores the tests the upstream fix (d6ccb0f) shipped, over whatever the agent wrote. Written before this evaluation existed and never shown to the agent.",
+        "command": "git -C $REFERENCE show d6ccb0f:crates/ctk-cli/tests/stats.rs > crates/ctk-cli/tests/stats.rs && git -C $REFERENCE show d6ccb0f:crates/ctk-cli/tests/init.rs > crates/ctk-cli/tests/init.rs && cargo test --locked -p ctk-cli",
+        "independent": "Restores the tests the upstream fix (d6ccb0f) shipped, taken from a reference clone the agent never had. Written before this evaluation existed and never shown to it.",
         "passes_when": "exit status 0"
       }
     },
@@ -79,7 +79,7 @@
       "repository": "cubtoken",
       "revision": "fc6d7d5",
       "setup": [
-        "Clone the repository at the pinned revision into a fresh directory.",
+        "Export the pinned revision without history into a fresh directory: `git -C $REFERENCE archive <revision> | tar -x -C <dir>`.",
         "Write the arm's .cubtoken.toml into the checkout root.",
         "cargo build --locked."
       ],
@@ -98,7 +98,7 @@
       "repository": "cubtoken",
       "revision": "fc6d7d5",
       "setup": [
-        "Clone the repository at the pinned revision into a fresh directory.",
+        "Export the pinned revision without history into a fresh directory: `git -C $REFERENCE archive <revision> | tar -x -C <dir>`.",
         "Write the arm's .cubtoken.toml into the checkout root."
       ],
       "prompt": "README.md contains a table of the configuration keys cubtoken accepts. Write CONFIG_AUDIT.md listing every key that table documents, one per line, each with the default value the table gives it. List only keys the table documents.",
@@ -113,6 +113,8 @@
   "check_conventions": {
     "cwd": "the task checkout root",
     "CHECKS": "absolute path to tests/evaluation/checks in this repository; export it before running a check",
-    "note": "Checks are copied or invoked only after the agent has stopped. The agent is never shown them and never has them in its checkout while working."
+    "note": "Checks are copied or invoked only after the agent has stopped. The agent is never shown them and never has them in its checkout while working.",
+    "REFERENCE": "absolute path to a full clone of the repository, used only by checks that need history. The agent's own checkout must not have it \u2014 see the history note.",
+    "history": "Task checkouts are history-stripped (`git archive <rev> | tar -x`). A full clone checked out at an older revision still contains later commits in its object store, so an agent can read the fix out of `git log` instead of the source. This matters most for t3, whose answer is a later commit in this same repository."
   }
 }

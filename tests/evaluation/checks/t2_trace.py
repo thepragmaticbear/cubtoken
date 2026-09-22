@@ -8,14 +8,16 @@ import re
 import sys
 
 # In the order they are reached, from hook stdin to the pass-through decision.
+# These identifiers must all exist at the revision the task pins (fc6d7d5):
+# a chain written against a newer tree makes the task unpassable.
 CHAIN = [
     ("run_hook", "the hook entry point"),
     ("dispatch", "per-tool dispatch"),
-    ("normalize_file_identity", "path normalization into a stable identity"),
+    ("ledger_for", "opening the session ledger for this payload"),
     ("is_protected", "the protection lookup that forces pass-through"),
 ]
 # The persistence side: recorded on Edit/Write/NotebookEdit, replayed on open.
-PERSISTENCE = ["note_edit_identity"]
+PERSISTENCE = ["note_edit"]
 FILES = ["lib.rs", "ledger.rs"]
 
 

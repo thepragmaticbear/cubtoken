@@ -15,9 +15,10 @@ use ctk_hook::ledger::{
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-fn p95(mut samples: Vec<Duration>) -> Duration {
-    samples.sort();
-    let rank = ((samples.len() as f64) * 0.95).ceil() as usize;
+/// Nearest-rank percentile. With n = 10, `ceil(10 * 0.95) = 10` makes "p95"
+/// the maximum sample; callers here use n >= 100.
+fn percentile(samples: &[Duration], fraction: f64) -> Duration {
+    let rank = ((samples.len() as f64) * fraction).ceil() as usize;
     samples[rank.saturating_sub(1).min(samples.len() - 1)]
 }
 
@@ -27,7 +28,9 @@ fn ms(duration: Duration) -> f64 {
 
 struct Row {
     operation: &'static str,
+    median_ms: f64,
     p95_ms: f64,
+    min_ms: f64,
     iterations: usize,
 }
 
@@ -44,9 +47,12 @@ fn measure(
         body();
         samples.push(started.elapsed());
     }
+    samples.sort();
     rows.push(Row {
         operation,
-        p95_ms: ms(p95(samples)),
+        median_ms: ms(percentile(&samples, 0.50)),
+        p95_ms: ms(percentile(&samples, 0.95)),
+        min_ms: ms(samples[0]),
         iterations,
     });
 }
@@ -134,25 +140,25 @@ fn hook_process_latency() {
 
     let mut rows: Vec<Row> = Vec::new();
     // `--version` does no work: whatever it costs is pure process startup.
-    measure(&mut rows, "startup (ctk --version)", 30, || {
+    measure(&mut rows, "startup (ctk --version)", 100, || {
         run(&["--version"], "");
     });
     measure(
         &mut rows,
         "end-to-end (ctk hook), 1,000 ledger records",
-        30,
+        100,
         || {
             run(&["hook"], &payload);
         },
     );
 
     println!("\n## Process cost (p95), excluded from the governor targets\n");
-    println!("| operation | p95 ms | iterations |");
-    println!("| --- | --- | --- |");
+    println!("| operation | min ms | median ms | p95 ms | iterations |");
+    println!("| --- | --- | --- | --- | --- |");
     for row in &rows {
         println!(
-            "| {} | {:.3} | {} |",
-            row.operation, row.p95_ms, row.iterations
+            "| {} | {:.3} | {:.3} | {:.3} | {} |",
+            row.operation, row.min_ms, row.median_ms, row.p95_ms, row.iterations
         );
     }
 }

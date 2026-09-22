@@ -24,9 +24,24 @@ def readme_table(text):
     return {m.group(1): m.group(2).strip() for m in (ROW.match(line) for line in text.splitlines()) if m}
 
 
+def stated_value(line, key):
+    """The value the audit line gives for `key`, or None if it gives none.
+
+    Accepts `key = value`, `key: value`, and a `| key | value |` table row.
+    """
+    after = line.split(key, 1)[1] if key in line else ""
+    if "|" in line:
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        for index, cell in enumerate(cells):
+            if re.search(rf"(?<![\w.]){re.escape(key)}(?![\w])", cell):
+                return cells[index + 1] if index + 1 < len(cells) else None
+    match = re.search(r"[=:]\s*(.+)$", after)
+    return match.group(1) if match else None
+
+
 def normalise(value):
     """Compare defaults by content, not incidental punctuation or spacing."""
-    return re.sub(r"[\s\"']", "", value).strip().lower()
+    return re.sub(r"[\s\"'`]", "", value).strip().lower()
 
 
 def main():
@@ -60,10 +75,19 @@ def main():
         if line is None:
             failures.append(f"CONFIG_AUDIT.md never lists {key}")
             continue
-        if normalise(default) not in normalise(line):
+        stated = stated_value(line, key)
+        if stated is None:
             failures.append(
-                f"CONFIG_AUDIT.md lists {key} without its default {default!r} "
+                f"CONFIG_AUDIT.md lists {key} with no value after it "
                 f"(line was: {line.strip()!r})"
+            )
+        elif normalise(stated) != normalise(default):
+            # Equality, not containment: `12000` contains `2000`, so a
+            # containment test accepts a wrong default whenever the right one
+            # happens to be a substring of it.
+            failures.append(
+                f"CONFIG_AUDIT.md gives {key} the default {stated.strip()!r}, "
+                f"but the README documents {default!r}"
             )
 
     listed = set(re.findall(r"(?<![\w.])([a-z]+\.[a-z_]+)(?![\w])", audit))

@@ -80,6 +80,25 @@ GOVERNOR_FIELDS = (
     "attributed_recovery_events",
     "legacy_refetch_count",
     "policy_applied",
+    # Read by the integrity and coverage passes. Absent, the "this arm ran as
+    # static" warning silently never fires — and that warning is the whole
+    # reason `ctk adaptive status` reports the field.
+    "learning_enabled",
+    "policy_evidence",
+)
+
+# Token counts and durations: never negative, never a bool, never a string.
+NON_NEGATIVE_FIELDS = (
+    ("usage", "input_tokens"),
+    ("usage", "cache_creation_input_tokens"),
+    ("usage", "cache_read_input_tokens"),
+    ("usage", "output_tokens"),
+    ("environment", "elapsed_ms"),
+    ("environment", "time_limit_ms"),
+    ("governor", "gross_savings_tokens"),
+    ("governor", "attributed_recovery_tokens"),
+    ("governor", "attributed_recovery_events"),
+    ("governor", "legacy_refetch_count"),
 )
 
 
@@ -164,13 +183,28 @@ def validate_record(record):
             f"{origin}: usage.field_mapping must document how the host's usage "
             "result was mapped onto these fields"
         )
-    if not isinstance(record["repetition"], int):
+    if not isinstance(record["repetition"], int) or isinstance(record["repetition"], bool):
         errors.append(f"{origin}: repetition must be an integer")
+    for group, field in NON_NEGATIVE_FIELDS:
+        value = record[group].get(field)
+        if value is None:
+            continue
+        if isinstance(value, bool) or not isinstance(value, int):
+            errors.append(
+                f"{origin}: {group}.{field} must be an integer or null, got {value!r}"
+            )
+        elif value < 0:
+            errors.append(f"{origin}: {group}.{field} is negative ({value})")
     return errors
 
 
-def check_cohort(records):
-    """Cross-record integrity. Mixed revisions and duplicates are data errors."""
+def check_cohort(records, expected=None):
+    """Cross-record integrity. Mixed revisions and duplicates are data errors.
+
+    `expected` is the matrix from `tasks.json`. Without it the expected runs can
+    only be inferred from the records present, which cannot notice that a whole
+    repetition or task never arrived.
+    """
     errors, warnings = [], []
 
     seen = {}
@@ -192,6 +226,14 @@ def check_cohort(records):
                 f"task {key[0]} repetition {key[1]} arm {key[2]} has "
                 f"{len(group)} records; expected exactly one"
             )
+
+    accounting = {record["usage"]["input_accounting"] for record in records}
+    if len(accounting) > 1:
+        errors.append(
+            "records mix usage accounting modes "
+            f"({sorted(accounting)}); the mode is a property of the provider, so a "
+            "mixed cohort compares totals that were never measured the same way"
+        )
 
     revisions = {record["cubtoken_revision"] for record in records}
     if len(revisions) > 1:
@@ -222,11 +264,25 @@ def check_cohort(records):
                 "this arm ran as static"
             )
 
-    tasks = sorted({record["task_id"] for record in records})
-    repetitions = sorted({record["repetition"] for record in records})
+    if expected is None:
+        tasks = sorted({record["task_id"] for record in records})
+        repetitions = sorted({record["repetition"] for record in records})
+        arms = ARMS
+        warnings.append(
+            "no expected matrix given (--expect-matrix): missing runs can only be "
+            "detected within the tasks and repetitions that arrived, so a wholly "
+            "absent task or repetition will not be reported"
+        )
+    else:
+        tasks, repetitions, arms = expected["tasks"], expected["repetitions"], expected["arms"]
+        for record in records:
+            if record["task_id"] not in tasks:
+                warnings.append(
+                    f"{record['run_id']}: task {record['task_id']} is not in the manifest"
+                )
     for task_id in tasks:
         for repetition in repetitions:
-            for arm in ARMS:
+            for arm in arms:
                 if (task_id, repetition, arm) not in cells:
                     warnings.append(
                         f"missing run: task {task_id} repetition {repetition} arm {arm}"
@@ -294,14 +350,24 @@ def estimated_net_context_saved(record):
 # --------------------------------------------------------------------------
 
 
-def analyze(records):
+def load_expected_matrix(path):
+    """Tasks, repetitions, and arms the manifest says should exist."""
+    manifest = json.loads(Path(path).read_text(encoding="utf-8"))
+    return {
+        "tasks": sorted(task["task_id"] for task in manifest["tasks"]),
+        "repetitions": list(range(1, int(manifest["repetitions"]) + 1)),
+        "arms": tuple(manifest.get("arms", ARMS)),
+    }
+
+
+def analyze(records, expected=None):
     """Build the report model. Raises DataError when records cannot be pooled."""
     errors = []
     for record in records:
         errors += validate_record(record)
     if errors:
         raise DataError("\n".join(errors))
-    cohort_errors, warnings = check_cohort(records)
+    cohort_errors, warnings = check_cohort(records, expected)
     if cohort_errors:
         raise DataError("\n".join(cohort_errors))
 
@@ -429,6 +495,15 @@ def _sum_field(usage_rows, field):
     return sum(present)
 
 
+def _elapsed_difference(baseline, treatment):
+    """Signed elapsed difference, or None when either side did not record one."""
+    first = baseline["record"]["environment"]["elapsed_ms"]
+    second = treatment["record"]["environment"]["elapsed_ms"]
+    if first is None or second is None:
+        return None
+    return first - second
+
+
 def _matched(by_cell, tasks, repetitions, baseline_arm, treatment_arm):
     """Signed baseline-minus-treatment differences over comparable pairs.
 
@@ -472,10 +547,7 @@ def _matched(by_cell, tasks, repetitions, baseline_arm, treatment_arm):
                     "treatment_tokens": treatment["task_tokens"],
                     "difference": difference,
                     "percent": percent,
-                    "elapsed_difference_ms": (
-                        baseline["record"]["environment"]["elapsed_ms"]
-                        - treatment["record"]["environment"]["elapsed_ms"]
-                    ),
+                    "elapsed_difference_ms": _elapsed_difference(baseline, treatment),
                 }
             )
     total_difference = sum(pair["difference"] for pair in pairs) if pairs else None
@@ -935,6 +1007,92 @@ def self_test():
         _check("a record without a documented field mapping is rejected", bool(unmapped))
     )
 
+    # Regressions for holes an adversarial review walked through. Each of these
+    # passed silently before.
+    mixed = False
+    try:
+        analyze(
+            [
+                _record("m1", "t1", 1, "disabled"),
+                _record(
+                    "m2", "t1", 1, "static",
+                    usage={"input_accounting": "total_inclusive"},
+                ),
+            ]
+        )
+    except DataError as error:
+        mixed = "mix usage accounting modes" in str(error)
+    passed.append(
+        _check("a cohort mixing usage accounting modes is rejected", mixed)
+    )
+
+    report = analyze(
+        [
+            _record("e1", "t1", 1, "disabled", environment={"elapsed_ms": None}),
+            _record("e2", "t1", 1, "static"),
+        ]
+    )
+    pairs = report["comparisons"]["compression_savings"]["pairs"]
+    passed.append(
+        _check(
+            "a null elapsed_ms yields an unavailable difference, not a crash",
+            len(pairs) == 1 and pairs[0]["elapsed_difference_ms"] is None,
+        )
+    )
+    passed.append(
+        _check(
+            "a report with a null elapsed_ms still renders",
+            "unavailable" in render_markdown(report),
+        )
+    )
+
+    passed.append(
+        _check(
+            "a negative token count is rejected",
+            any(
+                "negative" in error
+                for error in validate_record(
+                    _record("n1", "t1", 1, "static", usage={"input_tokens": -5000})
+                )
+            ),
+        )
+    )
+    passed.append(
+        _check(
+            "a string token count is rejected",
+            bool(
+                validate_record(
+                    _record("n2", "t1", 1, "static", usage={"input_tokens": "1000"})
+                )
+            ),
+        )
+    )
+
+    stripped = _record("l1", "t1", 1, "safe")
+    del stripped["governor"]["learning_enabled"]
+    passed.append(
+        _check(
+            "a record omitting learning_enabled is rejected",
+            any("learning_enabled" in error for error in validate_record(stripped)),
+        )
+    )
+
+    matrix = {"tasks": ["t1"], "repetitions": [1, 2], "arms": ARMS}
+    report = analyze([_record(f"r{a}", "t1", 1, a) for a in ARMS], matrix)
+    passed.append(
+        _check(
+            "a wholly missing repetition is reported against the manifest",
+            sum("repetition 2" in warning for warning in report["warnings"]) == len(ARMS),
+        )
+    )
+    report = analyze([_record(f"q{a}", "t1", 1, a) for a in ARMS])
+    passed.append(
+        _check(
+            "analysis without an expected matrix says so",
+            any("no expected matrix" in warning for warning in report["warnings"]),
+        )
+    )
+
     total, failures = len(passed), passed.count(False)
     print(f"\n{total - failures}/{total} self-test checks passed")
     return 0 if failures == 0 else 1
@@ -957,6 +1115,13 @@ def main(argv=None):
     )
     parser.add_argument("--out", metavar="PATH", help="Markdown report to write.")
     parser.add_argument(
+        "--expect-matrix",
+        metavar="PATH",
+        help="tests/evaluation/tasks.json — the tasks, repetitions, and arms that "
+        "should exist. Without it, a wholly missing task or repetition cannot be "
+        "detected.",
+    )
+    parser.add_argument(
         "--self-test",
         action="store_true",
         help="Run the built-in analysis checks and exit.",
@@ -976,8 +1141,15 @@ def main(argv=None):
     if not records:
         print("data error: no run records found", file=sys.stderr)
         return 2
+    expected = None
+    if args.expect_matrix:
+        try:
+            expected = load_expected_matrix(args.expect_matrix)
+        except (OSError, ValueError, KeyError) as error:
+            print(f"data error: cannot read --expect-matrix: {error}", file=sys.stderr)
+            return 2
     try:
-        report = analyze(records)
+        report = analyze(records, expected)
     except DataError as error:
         print("data errors — the evaluation must be repaired before the", file=sys.stderr)
         print("results can be interpreted:", file=sys.stderr)
