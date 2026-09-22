@@ -180,7 +180,6 @@ dependencies = [
  "clap",
  "ctk-compress",
  "ctk-hook",
- "ctk-sitter",
  "serde_json",
  "tempfile",
 ]

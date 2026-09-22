@@ -154,3 +154,39 @@ fn a_concurrent_reset_is_not_rewound_by_an_in_flight_refresh() {
         "an in-flight refresh must not rewind an epoch a reset already advanced"
     );
 }
+
+/// `refresh` walks and parses every session ledger in the project on each Stop,
+/// but it learns only from ledger-recorded decisions. With statistics off there
+/// is nothing to find, so the walk was pure cost on every assistant turn.
+#[test]
+fn stop_does_not_walk_the_ledgers_when_statistics_are_off() {
+    let temp = tempfile::tempdir().unwrap();
+    let data = temp.path().join(".cubtoken");
+    std::fs::create_dir_all(&data).unwrap();
+    let state = data.join("adaptive-v1.json");
+    let stop = serde_json::json!({
+        "hook_event_name": "Stop", "cwd": temp.path(), "session_id": "s"
+    })
+    .to_string();
+
+    let off = Config::load_from(
+        None,
+        Some("[adaptive]\nmode = \"observe\"\n[stats]\nledger = false"),
+    );
+    run_hook(&stop, &off);
+    assert!(
+        !state.exists(),
+        "a Stop with statistics off must not rebuild adaptive state"
+    );
+
+    // With statistics on, the same event does the work.
+    let on = Config::load_from(
+        None,
+        Some("[adaptive]\nmode = \"observe\"\n[stats]\nledger = true"),
+    );
+    run_hook(&stop, &on);
+    assert!(
+        state.exists(),
+        "a Stop with statistics on must still rebuild adaptive state"
+    );
+}

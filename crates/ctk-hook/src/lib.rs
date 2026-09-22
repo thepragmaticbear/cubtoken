@@ -82,13 +82,25 @@ fn data_dir_for(payload: &HookPayload) -> std::path::PathBuf {
 }
 
 fn refresh_adaptive(payload: &HookPayload, cfg: &Config) {
-    if cfg.adaptive.mode != ctk_compress::config::AdaptiveMode::Off {
+    // `refresh` walks and parses every session ledger in the project, and it
+    // learns only from ledger-recorded decisions. With statistics off there is
+    // nothing for it to find, so the walk is pure cost on every turn.
+    if cfg.adaptive.mode != ctk_compress::config::AdaptiveMode::Off && cfg.stats.ledger {
         let _ = adaptive_state::refresh(&data_dir_for(payload), unix_millis());
     }
 }
 
 fn effective_read_threshold(payload: &HookPayload, cfg: &Config) -> usize {
     if cfg.adaptive.mode != ctk_compress::config::AdaptiveMode::Safe {
+        return cfg.read.threshold_tokens;
+    }
+    // Every recommendation only ever raises the threshold (`One` is the
+    // configured value; the rest multiply it), so a Read already under the
+    // configured threshold cannot compress whatever the policy recommends.
+    // Checking that first matters: `preview_read` runs a full tree-sitter
+    // parse with no size gate, so without this every small Read in safe mode
+    // paid for a parse of a file that was always going to pass through.
+    if ctk_compress::read::response_tokens(&payload.tool_response) <= cfg.read.threshold_tokens {
         return cfg.read.threshold_tokens;
     }
     let Some(preview) =
