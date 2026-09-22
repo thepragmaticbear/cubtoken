@@ -12,7 +12,7 @@ stays `off` by default regardless of outcome.
 | Field | Value |
 | --- | --- |
 | Governor baseline (frozen) | `3d4a3d5fda3e34302a3d2704d6b019da06f45f77` |
-| Commit under test | `96ab8f3adbbd3489c0c527ef8a50e6b0df51071d` |
+| Commit under test | `320b7a7d18cf734712b68e09ea24805a32c9bcda` |
 | Branch | `feat/adaptive-governor-eval-spec-4b3ba0` |
 | Execution date | 2026-09-22 (UTC) |
 | Machine | Apple M5, arm64, macOS 27.0 |
@@ -23,7 +23,7 @@ The baseline commit is the in-progress governor imported verbatim from the
 dirty `main` checkout, so scored runs can name an immutable implementation.
 Later commits add acceptance coverage, the analysis contract, the performance
 drivers, the task matrix, and fixes for four defects found by adversarial
-review. **The comparison baseline is therefore `96ab8f3`, not `3d4a3d5`** —
+review. **The comparison baseline is therefore `320b7a7`, not `3d4a3d5`** —
 runtime behaviour changed. No run had been scored against the older one, so
 nothing is invalidated, but any further runtime change moves it again.
 
@@ -33,18 +33,18 @@ nothing is invalidated, but any further runtime change moves it again.
 
 ### Repository verification: PASS
 
-Run at `96ab8f3` on the machine above.
+Run at `320b7a7` on the machine above.
 
 | Command | Result |
 | --- | --- |
 | `cargo fmt --check` | exit 0 |
 | `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` | exit 0 |
-| `cargo test --locked --workspace --all-features` | exit 0 — **147 passed, 0 failed, 2 ignored** |
+| `cargo test --locked --workspace --all-features` | exit 0 — **148 passed, 0 failed, 2 ignored** |
 | `cargo audit --deny warnings` | exit 0 |
 | `python3 scripts/evaluate_governor.py --self-test` | exit 0 — **25/25 checks** |
 
 The two ignored tests are the performance drivers, run explicitly in gate 5.
-Test count rose from 134 at the frozen baseline to 147.
+Test count rose from 134 at the frozen baseline to 148.
 
 ### Acceptance coverage added: PASS
 
@@ -243,57 +243,75 @@ The distributions below are tight, which is what makes them usable.
 
 | records | category | operation | min ms | median ms | p95 ms | iterations |
 | --- | --- | --- | --- | --- | --- | --- |
-| 100 | typical | replay (Ledger::open) | 0.116 | 0.149 | 0.197 | 200 |
+| 100 | typical | replay (Ledger::open) | 0.110 | 0.130 | 0.153 | 200 |
 | 100 | typical | policy load (adaptive load) | 0.001 | 0.001 | 0.001 | 200 |
+| 100 | typical | safe-mode threshold preview (tree-sitter) | 1.454 | 1.494 | 1.570 | 200 |
 | 100 | typical | lookup (is_protected) | 0.000 | 0.000 | 0.000 | 2000 |
 | 100 | typical | attribution (classify) | 0.000 | 0.000 | 0.000 | 2000 |
-| 100 | typical | append (note_saving) | 0.087 | 0.112 | 0.160 | 200 |
-| 100 | typical | rebuild (adaptive refresh) | 0.259 | 0.280 | 0.359 | 200 |
-| 1000 | typical | replay (Ledger::open) | 0.390 | 0.414 | 0.444 | 200 |
+| 100 | typical | append (note_saving) | 0.079 | 0.102 | 0.154 | 200 |
+| 100 | typical | rebuild (adaptive refresh) | 0.274 | 0.282 | 0.363 | 200 |
+| 1000 | typical | replay (Ledger::open) | 0.411 | 0.419 | 0.446 | 200 |
 | 1000 | typical | policy load (adaptive load) | 0.001 | 0.001 | 0.001 | 200 |
+| 1000 | typical | safe-mode threshold preview (tree-sitter) | 1.443 | 1.499 | 1.565 | 200 |
 | 1000 | typical | lookup (is_protected) | 0.000 | 0.000 | 0.000 | 2000 |
 | 1000 | typical | attribution (classify) | 0.000 | 0.000 | 0.000 | 2000 |
-| 1000 | typical | append (note_saving) | 0.074 | 0.104 | 0.148 | 200 |
-| 1000 | typical | rebuild (adaptive refresh) | 0.762 | 0.809 | 0.915 | 200 |
-| 5000 | large | replay (Ledger::open) | 1.779 | 1.840 | 1.880 | 100 |
+| 1000 | typical | append (note_saving) | 0.079 | 0.104 | 0.154 | 200 |
+| 1000 | typical | rebuild (adaptive refresh) | 0.789 | 0.805 | 0.905 | 200 |
+| 5000 | large | replay (Ledger::open) | 1.809 | 1.842 | 1.924 | 100 |
 | 5000 | large | policy load (adaptive load) | 0.001 | 0.001 | 0.001 | 100 |
+| 5000 | large | safe-mode threshold preview (tree-sitter) | 1.473 | 1.500 | 1.598 | 100 |
 | 5000 | large | lookup (is_protected) | 0.000 | 0.000 | 0.000 | 1000 |
 | 5000 | large | attribution (classify) | 0.000 | 0.000 | 0.000 | 1000 |
-| 5000 | large | append (note_saving) | 0.074 | 0.091 | 0.108 | 100 |
-| 5000 | large | rebuild (adaptive refresh) | 2.974 | 3.074 | 3.173 | 100 |
-| 10000 | large | replay (Ledger::open) | 3.491 | 3.622 | 3.741 | 100 |
+| 5000 | large | append (note_saving) | 0.082 | 0.101 | 0.129 | 100 |
+| 5000 | large | rebuild (adaptive refresh) | 3.030 | 3.089 | 3.194 | 100 |
+| 10000 | large | replay (Ledger::open) | 3.575 | 3.617 | 3.687 | 100 |
 | 10000 | large | policy load (adaptive load) | 0.001 | 0.001 | 0.001 | 100 |
+| 10000 | large | safe-mode threshold preview (tree-sitter) | 1.458 | 1.502 | 1.551 | 100 |
 | 10000 | large | lookup (is_protected) | 0.000 | 0.000 | 0.000 | 1000 |
 | 10000 | large | attribution (classify) | 0.000 | 0.000 | 0.000 | 1000 |
-| 10000 | large | append (note_saving) | 0.085 | 0.101 | 0.126 | 100 |
-| 10000 | large | rebuild (adaptive refresh) | 5.799 | 5.968 | 6.072 | 100 |
+| 10000 | large | append (note_saving) | 0.076 | 0.090 | 0.126 | 100 |
+| 10000 | large | rebuild (adaptive refresh) | 5.876 | 5.995 | 6.072 | 100 |
+| 0 | per-Read | under-threshold Read, static | 0.081 | 0.089 | 0.125 | 200 |
+| 0 | per-Read | under-threshold Read, safe | 0.083 | 0.089 | 0.125 | 200 |
+| 0 | per-Read | whole Read through run_hook, static | 1.644 | 1.794 | 1.898 | 200 |
+| 0 | per-Read | whole Read through run_hook, safe | 3.301 | 3.489 | 3.609 | 200 |
 
-Per-tool-call p95: typical 0.444 ms (target 2 ms), large 3.741 ms (target 5 ms).
-Per-turn p95 (Stop/SessionEnd only): typical 0.915 ms (target 2 ms), large 6.072 ms (target 5 ms).
+Per-tool-call p95: typical 1.570 ms (target 2 ms), large 3.687 ms (target 5 ms).
+Per-turn p95 (Stop/SessionEnd only): typical 0.905 ms (target 2 ms), large 6.072 ms (target 5 ms).
 
-Worst governor-only p95: typical (100-1,000 records) 0.915 ms against a 2 ms target; large (5,000-10,000 records) 6.072 ms against a 5 ms target.
+Worst governor-only p95: typical (100-1,000 records) 1.570 ms against a 2 ms target; large (5,000-10,000 records) 6.072 ms against a 5 ms target.
 
 Reported per frequency, because `refresh` fires only on `Stop` and `SessionEnd`
-— once per turn — while the Read path pays `Ledger::open` plus a small state
-load on every call.
+— once per turn — while the Read path pays its cost on every call.
 
 | Path | Frequency | Typical p95 | Large p95 | Target | Verdict |
 | --- | --- | --- | --- | --- | --- |
-| Per tool call | every matched tool call | 0.444 ms | 3.741 ms | 2 / 5 ms | **PASS** |
+| Per tool call, static | every matched tool call | 1.967 ms | 3.741 ms | 2 / 5 ms | **PASS**, narrowly |
+| Per tool call, safe | every matched tool call | 3.725 ms | — | 2 ms | **FAIL** |
 | Per turn (rebuild) | `Stop`, `SessionEnd` | 0.915 ms | 6.072 ms | 2 / 5 ms | **FAIL at 10,000** |
 
-`policy load` — the per-Read cost safe mode adds — is 0.001 ms at every size.
+### A retracted claim
 
-### Process cost, excluded from the governor targets
+An earlier version of this receipt said "`policy load` — the per-Read cost safe
+mode adds — is 0.001 ms at every size". **That was wrong.** It measured only
+the JSON state snapshot and missed the tree-sitter parse sitting beside it:
+`effective_read_threshold` called `preview_read`, which parses with no size
+gate. Cloud review caught it.
 
-| operation | min ms | median ms | p95 ms | iterations |
-| --- | --- | --- | --- | --- |
-| startup (ctk --version) | 1.197 | 1.355 | 2.084 | 100 |
-| end-to-end (ctk hook), 1,000 ledger records | 3.607 | 3.848 | 4.124 | 100 |
+Two costs were hiding behind that number. The first is fixed: a Read under the
+threshold can never compress, whatever the policy recommends, so the parse is
+now skipped. Measured on a large file under a raised threshold, p95 per Read:
 
-Startup is ~1.4 ms median of the ~3.8 ms end-to-end figure, so the governor's
-own share at 1,000 records is roughly 2.5 ms. Reported separately so spawn cost
-is not attributed to the governor.
+| | static | safe |
+| --- | --- | --- |
+| before the fix | 0.124 ms | **1.643 ms** |
+| after | 0.132 ms | 0.137 ms |
+
+The second is not fixed: a Read that **does** compress parses the same content
+twice, once for the preview and once in the compressor. End to end that is
+**3.725 ms p95 in safe mode against static's 1.967 ms** — over the 2 ms
+typical-session target. Threading the preview through to the compressor changes
+a signature across two crates, so it belongs in its own commit.
 
 ### The remaining miss
 
@@ -311,6 +329,10 @@ unless a measurement requires it. Bounding what `load_all` reads — retention,
 or a per-session summary — is a design change belonging in its own commit, so
 the number is reported against the stated boundary rather than the boundary
 being moved to clear it.
+
+There are now **two** distinct misses, and safe mode is implicated in both:
+the per-turn rebuild at 10,000 records, and the per-Read double parse. Neither
+is a tail artifact; both reproduce with tight distributions.
 
 Caveat: single-machine numbers on an Apple M5. CI runs Ubuntu, macOS, and
 Windows; confirm on the slowest before calling this gate closed.
@@ -340,6 +362,13 @@ of the pinned revision rather than a fixture; percentile figures state their
 sample count and report median and minimum beside p95; and every check the
 harness relies on now has a recorded break attempt.
 
+A fourth round — cloud review — then caught a fifth instance of the same class:
+the receipt's "per-Read cost safe mode adds is 0.001 ms" measured one of the
+two things that happen per Read and missed the expensive one. The lesson
+generalises past instruments to claims: **a number is only as good as the scope
+it actually covers**, and I had not checked what `effective_read_threshold`
+does beyond the line I measured.
+
 ---
 
 ## Acceptance summary
@@ -350,7 +379,7 @@ harness relies on now has a recorded break attempt.
 | Measurement integrity | **PASS** (tooling) | Host usage mapping must be verified and recorded when runs happen. |
 | Task outcomes | **NOT RUN** | 40 scored runs. |
 | Token benefit and coverage | **NOT RUN** | Depends on the above. |
-| Performance | **PARTIAL** | `rebuild` 5.796 ms vs 5 ms at 10,000 records; cross-platform confirmation. |
+| Performance | **PARTIAL** | Per-turn `rebuild` 6.072 ms vs 5 ms at 10,000 records; per-Read safe mode 3.725 ms vs a 2 ms typical target (double parse); cross-platform confirmation. |
 
 ## Recommendation
 
