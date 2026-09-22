@@ -89,6 +89,14 @@ pub fn refresh(dir: &Path, now_ms: u64) -> AdaptiveState {
             )
         })
         .collect();
+    // Re-read the epoch before publishing. `adaptive reset` may have advanced
+    // it while this refresh was walking the ledgers, and these buckets were
+    // filtered against the epoch loaded at the start — publishing them would
+    // rewind the reset and resurrect exactly the observations it dropped.
+    let current = load(dir, previous.reset_at_ms);
+    if current.reset_at_ms != previous.reset_at_ms {
+        return current;
+    }
     let state = AdaptiveState {
         schema: 1,
         policy_version: 1,

@@ -118,3 +118,60 @@ fn status_warns_when_statistics_disable_adaptation() {
         "mode off needs no warning; printed: {printed}"
     );
 }
+
+/// `explain` is the diagnostic the runbook tells operators to use while warming
+/// a checkpoint, which happens in `observe` mode. It reported the bucket's
+/// recommendation as the decision regardless of mode — but the hook only
+/// applies a recommendation in `safe` mode, so `explain` announced "disabled"
+/// on a file the very next Read would compress.
+#[test]
+fn explain_reports_the_threshold_the_hook_will_actually_use() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = format!(
+        "pub fn large() {{\n{}\n}}\n",
+        "    let value = 42;\n".repeat(1_500)
+    );
+    let path = dir.path().join("large.rs");
+    std::fs::write(&path, source).unwrap();
+    std::fs::create_dir_all(dir.path().join(".cubtoken")).unwrap();
+    std::fs::write(
+        dir.path().join(".cubtoken/adaptive-v1.json"),
+        r#"{"schema":1,"policy_version":1,"reset_at_ms":0,"buckets":{"rust|8k-16k|skeleton":{"outcomes":[],"recommendation":"disabled"}}}"#,
+    )
+    .unwrap();
+
+    let explain = |mode: &str| {
+        std::fs::write(
+            dir.path().join(".cubtoken.toml"),
+            format!("[adaptive]\nmode = \"{mode}\"\n"),
+        )
+        .unwrap();
+        let out = ctk(dir.path())
+            .args(["adaptive", "explain", path.to_str().unwrap()])
+            .assert()
+            .success();
+        String::from_utf8_lossy(&out.get_output().stdout).into_owned()
+    };
+
+    // In `safe` the recommendation is applied, so reporting it is correct.
+    let safe = explain("safe");
+    assert!(
+        safe.contains("disabled"),
+        "safe mode applies the recommendation; explain should say so: {safe}"
+    );
+
+    // In `observe` and `off` it is not applied: the hook uses the configured
+    // threshold and will compress this file.
+    for mode in ["observe", "off"] {
+        let printed = explain(mode);
+        assert!(
+            !printed.contains("effective threshold: 18446744073709551615"),
+            "{mode} mode does not apply the recommendation, so the effective \
+             threshold must not be the disabled sentinel: {printed}"
+        );
+        assert!(
+            printed.contains("not applied") || printed.contains(&format!("mode: {mode}")),
+            "{mode} mode must say the recommendation is not in force: {printed}"
+        );
+    }
+}

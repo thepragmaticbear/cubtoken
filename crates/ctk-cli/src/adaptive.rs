@@ -103,14 +103,28 @@ pub fn explain(file: &str) -> Result<(), String> {
         language = preview.language,
         strategy = preview.strategy,
     );
-    println!(
-        "configured threshold: {} | effective threshold: {}",
-        cfg.read.threshold_tokens,
+    // Only `safe` applies a recommendation; `off` and `observe` use the
+    // configured threshold. Reporting the recommendation as the decision in
+    // those modes announces a back-off the next Read will not perform.
+    let applied = cfg.adaptive.mode == ctk_compress::config::AdaptiveMode::Safe;
+    let effective = if applied {
         recommendation.effective_threshold(cfg.read.threshold_tokens)
+    } else {
+        cfg.read.threshold_tokens
+    };
+    println!(
+        "mode: {} | configured threshold: {} | effective threshold: {effective}",
+        mode_label(cfg.adaptive.mode),
+        cfg.read.threshold_tokens,
     );
     println!(
-        "observations: {observations} | recovery overhead: {overhead}% | decision: {}",
-        label(recommendation)
+        "observations: {observations} | recovery overhead: {overhead}% | recommendation: {}{}",
+        label(recommendation),
+        if applied {
+            ""
+        } else {
+            " (not applied: only `safe` mode acts on it)"
+        }
     );
     Ok(())
 }
@@ -121,6 +135,14 @@ pub fn reset() -> Result<(), String> {
         .map_err(|error| format!("adaptive reset failed: {error}"))?;
     println!("adaptive state reset at {}", state.reset_at_ms);
     Ok(())
+}
+
+fn mode_label(mode: ctk_compress::config::AdaptiveMode) -> &'static str {
+    match mode {
+        ctk_compress::config::AdaptiveMode::Off => "off",
+        ctk_compress::config::AdaptiveMode::Observe => "observe",
+        ctk_compress::config::AdaptiveMode::Safe => "safe",
+    }
 }
 
 fn label(recommendation: Recommendation) -> &'static str {

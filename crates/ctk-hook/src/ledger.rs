@@ -70,6 +70,11 @@ struct EditEvent {
 
 pub struct Ledger {
     file: PathBuf,
+    /// The directory is safe to write and this handle is not read-only. Kept
+    /// apart from `lock`, which additionally requires winning the advisory
+    /// lockfile: edit protection is a correctness guarantee and must not be
+    /// lost merely because another process holds that lock.
+    writable: bool,
     lock: Option<LedgerLock>,
     edited: HashSet<String>,
     compressed: HashSet<String>,
@@ -139,15 +144,15 @@ impl Ledger {
     }
 
     fn from_file(file: PathBuf, writable: bool) -> Self {
+        let writable = writable && file.parent().is_some_and(safe_data_dir);
         let lock = if writable {
-            file.parent()
-                .filter(|parent| safe_data_dir(parent))
-                .and_then(|_| LedgerLock::try_acquire(&file))
+            LedgerLock::try_acquire(&file)
         } else {
             None
         };
         let mut ledger = Self {
             file,
+            writable,
             lock,
             edited: HashSet::new(),
             compressed: HashSet::new(),
@@ -270,7 +275,7 @@ impl Ledger {
                 path: path.to_string(),
                 sequence,
             });
-            self.append(&Record::Edit {
+            self.append_durable(&Record::Edit {
                 path: path.to_string(),
                 sequence,
             });
@@ -441,8 +446,30 @@ impl Ledger {
             .collect()
     }
 
+    /// Statistics: only written by the handle holding the advisory lock, so
+    /// concurrent writers do not each add their own view of the same session.
     fn append(&self, record: &Record) {
         if self.lock.is_none() {
+            return;
+        }
+        self.append_durable(record);
+    }
+
+    /// Edit protection: written whenever the directory is safe, lock or not.
+    /// A single short line opened `O_APPEND` does not interleave with another
+    /// process's line, and the alternative when the lock is unavailable is not
+    /// a tidier record — it is no record at all, and a file the model edited
+    /// staying compressible for the rest of the session.
+    fn append_durable(&self, record: &Record) {
+        if !self.writable {
+            return;
+        }
+        // The data directory is checked for being a symlink when the ledger is
+        // opened; the session file inside it needs the same check, or a
+        // `session-*.jsonl` symlink redirects these appends into its target.
+        if std::fs::symlink_metadata(&self.file)
+            .is_ok_and(|metadata| metadata.file_type().is_symlink())
+        {
             return;
         }
         let Ok(json) = serde_json::to_string(record) else {
