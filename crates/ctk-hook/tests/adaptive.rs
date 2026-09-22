@@ -439,3 +439,64 @@ fn too_few_observations_leave_the_threshold_unchanged() {
         "the eighth observation is what lets the policy act"
     );
 }
+
+/// The exact aggregation `refresh` performs when it turns ledger records into
+/// policy outcomes: only high-confidence recoveries carrying the decision's own
+/// id count toward that decision's recovery cost, and several of them sum.
+/// Pinned before optimising the aggregation so the shape cannot drift with it.
+#[test]
+fn refresh_sums_only_high_confidence_recoveries_for_the_matching_decision() {
+    use ctk_hook::ledger::{CompressionDecision, ElidedRange, Recovery, RecoveryKind};
+
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path().join(".cubtoken");
+    let mut ledger = Ledger::open(&dir, "grouping");
+    ledger.note_decision(CompressionDecision {
+        decision_id: "target".to_string(),
+        turn: 1,
+        batch: 1,
+        sequence: 1,
+        recorded_at_ms: 1_000,
+        file_identity: "/a.rs".to_string(),
+        content_fingerprint: "v1".to_string(),
+        language: "rust".to_string(),
+        strategy: "skeleton".to_string(),
+        profile: "default".to_string(),
+        tokens_in: 10_000,
+        tokens_out: 1_000,
+        elided_ranges: vec![ElidedRange {
+            start_line: 2,
+            end_line: 90,
+        }],
+    });
+    let recovery = |decision_id: Option<&str>, confidence, tokens| Recovery {
+        path: "/a.rs".to_string(),
+        tokens,
+        duration_ms: 0,
+        decision_id: decision_id.map(str::to_string),
+        kind: Some(RecoveryKind::Targeted),
+        confidence: Some(confidence),
+        turn: Some(1),
+        batch: Some(2),
+    };
+    // Two high-confidence recoveries for this decision: these sum.
+    ledger.note_recovery(recovery(Some("target"), Confidence::High, 300));
+    ledger.note_recovery(recovery(Some("target"), Confidence::High, 200));
+    // Everything else must be ignored by the policy.
+    ledger.note_recovery(recovery(Some("target"), Confidence::Medium, 9_000));
+    ledger.note_recovery(recovery(Some("target"), Confidence::Low, 9_000));
+    ledger.note_recovery(recovery(Some("other-decision"), Confidence::High, 9_000));
+    ledger.note_recovery(recovery(None, Confidence::High, 9_000));
+    drop(ledger);
+
+    ctk_hook::adaptive_state::reset(&dir, 0).unwrap();
+    let state = ctk_hook::adaptive_state::refresh(&dir, 2_000);
+    let key = ctk_hook::adaptive::bucket_key("rust", 10_000, "skeleton");
+    let outcomes = &state.buckets.get(&key).expect("bucket missing").outcomes;
+    assert_eq!(outcomes.len(), 1);
+    assert_eq!(outcomes[0].gross_saved, 9_000);
+    assert_eq!(
+        outcomes[0].recovery_tokens, 500,
+        "only the two high-confidence recoveries naming this decision may count"
+    );
+}

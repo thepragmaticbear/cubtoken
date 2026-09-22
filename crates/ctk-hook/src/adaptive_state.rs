@@ -1,7 +1,7 @@
 //! Bounded on-disk adaptive snapshot. It never participates in correctness:
 //! unreadable state simply falls back to static Read behavior.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::Write as _;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -31,20 +31,29 @@ pub fn refresh(dir: &Path, now_ms: u64) -> AdaptiveState {
     let previous = load(dir, now_ms);
     let mut grouped: BTreeMap<String, Vec<Outcome>> = BTreeMap::new();
     for ledger in Ledger::load_all(dir) {
+        // Group recoveries by decision in one pass. Scanning every recovery per
+        // decision made this O(decisions x recoveries): at 10,000 ledger records
+        // that measured 17.9 ms p95 against the 5 ms large-session target, and
+        // `refresh` walks every session file in the project on each Stop.
+        let mut recovered: HashMap<&str, usize> = HashMap::new();
+        for recovery in ledger.recoveries() {
+            if recovery.confidence != Some(Confidence::High) {
+                continue;
+            }
+            let Some(decision_id) = recovery.decision_id.as_deref() else {
+                continue;
+            };
+            let total = recovered.entry(decision_id).or_insert(0);
+            *total = total.saturating_add(recovery.tokens);
+        }
         for decision in ledger.decisions() {
             if decision.recorded_at_ms < previous.reset_at_ms {
                 continue;
             }
-            let recovery_tokens = ledger
-                .recoveries()
-                .iter()
-                .filter(|recovery| {
-                    recovery.decision_id.as_deref() == Some(decision.decision_id.as_str())
-                        && recovery.confidence == Some(Confidence::High)
-                })
-                .fold(0usize, |total, recovery| {
-                    total.saturating_add(recovery.tokens)
-                });
+            let recovery_tokens = recovered
+                .get(decision.decision_id.as_str())
+                .copied()
+                .unwrap_or(0);
             grouped
                 .entry(adaptive::bucket_key(
                     &decision.language,
