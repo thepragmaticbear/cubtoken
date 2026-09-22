@@ -54,14 +54,101 @@ pub fn preview_content(file_path: &str, content: &str) -> ReadPreview {
     }
 }
 
-/// Compress with a caller-selected threshold. The threshold can only make a
-/// Read pass through; it never changes global configuration or representation.
-pub fn compress_read_with_threshold(
-    tool_input: &Value,
-    tool_response: &Value,
+/// A Read that passed the cheap guards, sized but **not yet parsed**.
+///
+/// Splitting this from the parse is what lets safe mode pick a threshold and
+/// compress with a single tree-sitter pass. It also keeps the old property
+/// that a Read under the threshold is never parsed at all.
+pub struct ReadCandidate<'a> {
+    file_path: &'a str,
+    content: &'a str,
+    tokens_in: usize,
+}
+
+impl<'a> ReadCandidate<'a> {
+    pub fn tokens_in(&self) -> usize {
+        self.tokens_in
+    }
+
+    /// Runs the tree-sitter parse. Call once; hand the result to `compress`.
+    pub fn parse(self) -> ParsedRead<'a> {
+        let view = read_view(self.content, self.file_path);
+        ParsedRead {
+            file_path: self.file_path,
+            content: self.content,
+            tokens_in: self.tokens_in,
+            view,
+        }
+    }
+}
+
+/// A parsed Read: the view the compressor needs and the metadata the adaptive
+/// policy buckets on, from one parse.
+pub struct ParsedRead<'a> {
+    file_path: &'a str,
+    content: &'a str,
+    tokens_in: usize,
+    view: ReadView,
+}
+
+impl ParsedRead<'_> {
+    pub fn tokens_in(&self) -> usize {
+        self.tokens_in
+    }
+
+    pub fn language(&self) -> &str {
+        &self.view.language
+    }
+
+    pub fn strategy(&self) -> &str {
+        &self.view.strategy
+    }
+
+    /// Build the replacement response, reusing the parse this value holds.
+    pub fn compress(self, tool_response: &Value, threshold_tokens: usize) -> Option<ReadOutcome> {
+        if self.tokens_in <= threshold_tokens {
+            return None;
+        }
+        let file_path = self.file_path;
+        let content = self.content;
+        let compressed = format!(
+            "[cubtoken: compressed view of {file_path} — {} chars → skeleton. \
+             This is NOT the full file. The Read tool adds its own sequential \
+             numbering down the left edge of this block; ignore it. The real file \
+             line numbers are the ones in this view, and bracketed [La-Lb] ranges \
+             mark elided lines — to see any of them run Read(file_path={file_path}, \
+             offset=<first line>, limit=<line count>). Before quoting or editing \
+             this file, Read the exact target region first.]\n\n{}",
+            content.chars().count(),
+            self.view.rendered
+        );
+
+        // not worth substituting unless meaningfully smaller
+        if compressed.chars().count() * 10 > content.chars().count() * 7 {
+            return None;
+        }
+        let tokens_out = est_tokens(&compressed);
+        Some(ReadOutcome {
+            updated_response: rebuild_response(tool_response, &compressed),
+            tokens_in: self.tokens_in,
+            tokens_out,
+            metadata: ReadMetadata {
+                content_fingerprint: content_fingerprint(content),
+                language: self.view.language,
+                strategy: self.view.strategy,
+                elided_ranges: self.view.elided_ranges,
+            },
+        })
+    }
+}
+
+/// The cheap guards and sizing, with no parse. `None` means pass through:
+/// disabled, targeted (offset/limit), excluded path, or no extractable content.
+pub fn read_candidate<'a>(
+    tool_input: &'a Value,
+    tool_response: &'a Value,
     cfg: &Config,
-    threshold_tokens: usize,
-) -> Option<ReadOutcome> {
+) -> Option<ReadCandidate<'a>> {
     if !cfg.read.enabled {
         return None;
     }
@@ -73,45 +160,29 @@ pub fn compress_read_with_threshold(
         return None;
     }
     let content = extract_content(tool_response)?;
-    let tokens_in = est_tokens(content);
-    if tokens_in <= threshold_tokens {
-        return None;
-    }
-
-    let view = read_view(content, file_path);
-    let compressed = format!(
-        "[cubtoken: compressed view of {file_path} — {} chars → skeleton. \
-         This is NOT the full file. The Read tool adds its own sequential \
-         numbering down the left edge of this block; ignore it. The real file \
-         line numbers are the ones in this view, and bracketed [La-Lb] ranges \
-         mark elided lines — to see any of them run Read(file_path={file_path}, \
-         offset=<first line>, limit=<line count>). Before quoting or editing \
-         this file, Read the exact target region first.]\n\n{}",
-        content.chars().count(),
-        view.rendered
-    );
-
-    // not worth substituting unless meaningfully smaller
-    if compressed.chars().count() * 10 > content.chars().count() * 7 {
-        return None;
-    }
-    let tokens_out = est_tokens(&compressed);
-    Some(ReadOutcome {
-        updated_response: rebuild_response(tool_response, &compressed),
-        tokens_in,
-        tokens_out,
-        metadata: ReadMetadata {
-            content_fingerprint: content_fingerprint(content),
-            language: view.language,
-            strategy: view.strategy,
-            elided_ranges: view.elided_ranges,
-        },
+    Some(ReadCandidate {
+        file_path,
+        content,
+        tokens_in: est_tokens(content),
     })
 }
 
-/// The Read tool_response shape (recorded fixture, 2026-06):
-/// `{type:"text", file:{filePath, content, numLines, startLine, totalLines}}`.
-/// Fallback: a bare string response.
+/// Compress with a caller-selected threshold. The threshold can only make a
+/// Read pass through; it never changes global configuration or representation.
+pub fn compress_read_with_threshold(
+    tool_input: &Value,
+    tool_response: &Value,
+    cfg: &Config,
+    threshold_tokens: usize,
+) -> Option<ReadOutcome> {
+    let candidate = read_candidate(tool_input, tool_response, cfg)?;
+    // Threshold before parse: an under-threshold Read is never parsed.
+    if candidate.tokens_in() <= threshold_tokens {
+        return None;
+    }
+    candidate.parse().compress(tool_response, threshold_tokens)
+}
+
 fn extract_content(tool_response: &Value) -> Option<&str> {
     if let Some(c) = tool_response
         .pointer("/file/content")

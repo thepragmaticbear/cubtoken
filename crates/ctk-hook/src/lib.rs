@@ -90,26 +90,22 @@ fn refresh_adaptive(payload: &HookPayload, cfg: &Config) {
     }
 }
 
-fn effective_read_threshold(payload: &HookPayload, cfg: &Config) -> usize {
+/// The threshold to compress at, given a Read that has already been parsed.
+///
+/// Takes `ParsedRead` rather than re-deriving the bucket from the payload: the
+/// language and strategy it buckets on come from a tree-sitter parse, and the
+/// compressor needs that same parse. Passing it through is what keeps safe
+/// mode to one parse per Read instead of two.
+fn effective_read_threshold(
+    payload: &HookPayload,
+    cfg: &Config,
+    parsed: &ctk_compress::read::ParsedRead<'_>,
+) -> usize {
     if cfg.adaptive.mode != ctk_compress::config::AdaptiveMode::Safe {
         return cfg.read.threshold_tokens;
     }
-    // Every recommendation only ever raises the threshold (`One` is the
-    // configured value; the rest multiply it), so a Read already under the
-    // configured threshold cannot compress whatever the policy recommends.
-    // Checking that first matters: `preview_read` runs a full tree-sitter
-    // parse with no size gate, so without this every small Read in safe mode
-    // paid for a parse of a file that was always going to pass through.
-    if ctk_compress::read::response_tokens(&payload.tool_response) <= cfg.read.threshold_tokens {
-        return cfg.read.threshold_tokens;
-    }
-    let Some(preview) =
-        ctk_compress::read::preview_read(&payload.tool_input, &payload.tool_response)
-    else {
-        return cfg.read.threshold_tokens;
-    };
     let state = adaptive_state::load(&data_dir_for(payload), unix_millis());
-    let key = adaptive::bucket_key(&preview.language, preview.tokens_in, &preview.strategy);
+    let key = adaptive::bucket_key(parsed.language(), parsed.tokens_in(), parsed.strategy());
     adaptive_state::recommendation(&state, &key).effective_threshold(cfg.read.threshold_tokens)
 }
 
@@ -253,12 +249,20 @@ fn dispatch(payload: &HookPayload, cfg: &Config) -> Option<serde_json::Value> {
             if cfg.stats.ledger && record_full_repeat_escape(&mut ledger, payload, &identity) {
                 return None;
             }
-            let outcome = ctk_compress::read::compress_read_with_threshold(
+            let candidate = ctk_compress::read::read_candidate(
                 &payload.tool_input,
                 &payload.tool_response,
                 cfg,
-                effective_read_threshold(payload, cfg),
             )?;
+            // Every recommendation only ever raises the threshold, so a Read
+            // already under the configured one cannot compress whatever the
+            // policy says. Bailing here keeps the parse off the common path.
+            if candidate.tokens_in() <= cfg.read.threshold_tokens {
+                return None;
+            }
+            let parsed = candidate.parse();
+            let threshold = effective_read_threshold(payload, cfg, &parsed);
+            let outcome = parsed.compress(&payload.tool_response, threshold)?;
             if cfg.stats.ledger {
                 let sequence = ledger.next_sequence();
                 let decision_id = payload
