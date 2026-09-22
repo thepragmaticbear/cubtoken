@@ -18,19 +18,21 @@ stays `off` by default regardless of outcome.
 
 | Field | Value |
 | --- | --- |
-| Governor baseline (frozen) | `3d4a3d5fda3e34302a3d2704d6b019da06f45f77` |
-| Commit under test | `defb5f58946085e50dc5999d2f0f453cf4517f30` |
-| Branch | `feat/adaptive-governor-eval-spec-4b3ba0` |
+| Governor as first written | `d1a78fe299f34591e8d83f9c06bc65e1ebbe2bc2` |
+| Commit under test (runtime) | `acce8955956946edc73b96ca9377746106ee8ea8` |
+| Branches | `feat/adaptive-read-governor` (runtime) and `feat/adaptive-governor-evaluation` (this evaluation, stacked on it) |
 | Execution date | 2026-09-22 (UTC) |
 | Machine | Apple M5, arm64, macOS 27.0 |
 | Toolchain | rustc 1.96.0, cargo 1.96.0, Python 3.14.7 |
 | `ctk` version | 0.1.3 |
 
+These SHAs are from the pull requests' branches. If the PRs are squash-merged they won't be on `main`, but GitHub keeps them reachable through each PR's `refs/pull/<n>/head`.
+
 The baseline commit is the in-progress governor imported verbatim from the
 dirty `main` checkout, so scored runs can name an immutable implementation.
 Later commits add acceptance coverage, the analysis contract, the performance
 drivers, the task matrix, and fixes for four defects found by adversarial
-review. **The comparison baseline is therefore `defb5f5`, not `3d4a3d5`** —
+review. **The comparison baseline is therefore `acce895`, not `d1a78fe`** —
 runtime behaviour changed. No run had been scored against the older one, so
 nothing is invalidated, but any further runtime change moves it again.
 
@@ -40,7 +42,7 @@ nothing is invalidated, but any further runtime change moves it again.
 
 ### Repository verification: PASS
 
-Run at `defb5f5` on the machine above.
+Run at `acce895` (runtime) and at the head of the evaluation branch, on the machine above.
 
 | Command | Result |
 | --- | --- |
@@ -224,7 +226,7 @@ Two outcomes must not be misread as successes when the runs happen:
 
 ## Gate 5 — Performance: PARTIAL
 
-Measured at `96ab8f3`, release build. Fixture sizes **100 and 1,000 records
+Measured on source byte-identical to the head of the evaluation branch, release build. Fixture sizes **100 and 1,000 records
 are "typical" (2 ms target); 5,000 and 10,000 are "large" (5 ms target)**, as
 the spec requires be stated explicitly.
 
@@ -424,7 +426,7 @@ exactly as the spec frames them:
    pays the same per-turn cost as `safe`. It avoids only the correctness risk
    of acting on the policy.
 
-Whichever option is chosen, `b29375c` should be reviewed on its own first. It
+Whichever option is chosen, `185f0ca` should be reviewed on its own first. It
 contains the two Critical ledger fixes, which change how edit protection
 records its state. They landed partway through the code review, so no one
 other than their author has examined them.
