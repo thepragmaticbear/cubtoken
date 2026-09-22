@@ -217,3 +217,225 @@ fn safe_mode_only_reduces_compression() {
     )
     .is_none());
 }
+
+/// Statistics are optional (`[stats] ledger = false`), but the two safety
+/// behaviours must not be optional with them: a session-edited file is never
+/// compressed, and a targeted Read always passes through. Both live outside
+/// the `cfg.stats.ledger` guards in `dispatch`; this pins them there.
+#[test]
+fn statistics_disabled_keeps_edit_and_targeted_protection() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("large.rs");
+    std::fs::write(&path, source()).unwrap();
+    let cfg = Config::load_from(
+        None,
+        Some("[read]\nthreshold_tokens = 10\nnever_compress = []\n[stats]\nledger = false"),
+    );
+
+    // A targeted Read passes through even with no ledger to attribute it to.
+    let targeted = serde_json::json!({
+        "hook_event_name": "PostToolUse", "tool_name": "Read", "session_id": "no-stats",
+        "cwd": temp.path(), "tool_input": {"file_path": &path, "offset": 5, "limit": 2},
+        "tool_response": {"file": {"filePath": &path, "content": "    let value = 42;\n", "startLine": 5, "numLines": 2}}
+    });
+    assert!(
+        run_hook(&targeted.to_string(), &cfg).is_none(),
+        "targeted Read must pass through with statistics disabled"
+    );
+
+    // An edited file stays protected for the session.
+    let edit = serde_json::json!({
+        "hook_event_name": "PostToolUse", "tool_name": "Edit", "session_id": "no-stats",
+        "cwd": temp.path(), "tool_input": {"file_path": &path}, "tool_response": {}
+    });
+    assert!(run_hook(&edit.to_string(), &cfg).is_none());
+    assert!(
+        run_hook(&full_read(&path, temp.path(), "no-stats").to_string(), &cfg).is_none(),
+        "an edited file must never be compressed, even with statistics disabled"
+    );
+}
+
+/// `[adaptive] mode = "safe"` with `[stats] ledger = false` is a silent no-op:
+/// no decision is ever recorded, so no bucket ever reaches the eight-observation
+/// minimum and the effective threshold never moves. This is the current, chosen
+/// behaviour (statistics stay optional) — it is pinned here because an
+/// evaluation arm configured this way would report "safe" while running static.
+#[test]
+fn safe_mode_without_statistics_cannot_learn() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("large.rs");
+    std::fs::write(&path, source()).unwrap();
+    let cfg = Config::load_from(
+        None,
+        Some(
+            "[read]\nthreshold_tokens = 10\nnever_compress = []\n\
+             [adaptive]\nmode = \"safe\"\n[stats]\nledger = false",
+        ),
+    );
+    for _ in 0..12 {
+        run_hook(&start_turn(temp.path(), "blind"), &cfg);
+        assert!(run_hook(&full_read(&path, temp.path(), "blind").to_string(), &cfg).is_some());
+    }
+    let ledger = Ledger::open(&temp.path().join(".cubtoken"), "blind");
+    assert!(
+        ledger.decisions().is_empty(),
+        "no decisions can be attributed with statistics disabled"
+    );
+    let state = ctk_hook::adaptive_state::refresh(&temp.path().join(".cubtoken"), 1_000);
+    assert!(
+        state.buckets.is_empty(),
+        "safe mode cannot learn without the ledger it learns from"
+    );
+}
+
+/// `adaptive reset` sets a new epoch; a later `refresh` must not resurrect the
+/// observations that predate it. Without the `reset_at_ms` filter a reset would
+/// be undone by the very next hook call.
+#[test]
+fn reset_survives_a_later_refresh() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("large.rs");
+    std::fs::write(&path, source()).unwrap();
+    let cfg = Config::load_from(
+        None,
+        Some("[read]\nthreshold_tokens = 10\nnever_compress = []\n[adaptive]\nmode = \"observe\""),
+    );
+    let dir = temp.path().join(".cubtoken");
+    run_hook(&start_turn(temp.path(), "epoch"), &cfg);
+    assert!(run_hook(&full_read(&path, temp.path(), "epoch").to_string(), &cfg).is_some());
+    assert!(
+        !ctk_hook::adaptive_state::refresh(&dir, 1_000)
+            .buckets
+            .is_empty(),
+        "the decision should be visible before the reset"
+    );
+
+    // Reset to an epoch after every recorded decision, then refresh again.
+    let far_future = u64::MAX;
+    ctk_hook::adaptive_state::reset(&dir, far_future).unwrap();
+    let state = ctk_hook::adaptive_state::refresh(&dir, far_future);
+    assert_eq!(state.reset_at_ms, far_future);
+    assert!(
+        state.buckets.is_empty(),
+        "a refresh must not resurrect observations from before the reset epoch"
+    );
+}
+
+/// Unreadable, truncated, or future-schema state is not a correctness input:
+/// safe mode falls back to the configured threshold and still compresses.
+#[test]
+fn unavailable_or_malformed_state_falls_back_to_static() {
+    let cfg = Config::load_from(
+        None,
+        Some("[read]\nthreshold_tokens = 10\nnever_compress = []\n[adaptive]\nmode = \"safe\""),
+    );
+    for (name, raw) in [
+        ("truncated", r#"{"schema":1,"policy_version":1,"#),
+        ("not json", "not json at all"),
+        ("empty", ""),
+        (
+            "future schema",
+            r#"{"schema":9,"policy_version":1,"reset_at_ms":0,"buckets":{"rust|8k-16k|skeleton":{"outcomes":[],"recommendation":"disabled"}}}"#,
+        ),
+        (
+            "future policy",
+            r#"{"schema":1,"policy_version":9,"reset_at_ms":0,"buckets":{"rust|8k-16k|skeleton":{"outcomes":[],"recommendation":"disabled"}}}"#,
+        ),
+    ] {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("large.rs");
+        std::fs::write(&path, source()).unwrap();
+        std::fs::create_dir_all(temp.path().join(".cubtoken")).unwrap();
+        std::fs::write(temp.path().join(".cubtoken/adaptive-v1.json"), raw).unwrap();
+        assert!(
+            run_hook(&full_read(&path, temp.path(), name).to_string(), &cfg).is_some(),
+            "{name} state must fall back to the configured threshold"
+        );
+    }
+
+    // No state file at all is the same story.
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("large.rs");
+    std::fs::write(&path, source()).unwrap();
+    assert!(run_hook(&full_read(&path, temp.path(), "absent").to_string(), &cfg).is_some());
+}
+
+/// The eight-observation minimum, exercised through `refresh` rather than the
+/// pure policy: seven refetch-heavy observations must leave the threshold
+/// alone; the eighth is what earns a back-off.
+#[test]
+fn too_few_observations_leave_the_threshold_unchanged() {
+    use ctk_hook::adaptive::Recommendation;
+    use ctk_hook::ledger::{CompressionDecision, ElidedRange, Recovery, RecoveryKind};
+
+    let seed = |count: usize, session: &str| {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().join(".cubtoken");
+        let mut ledger = Ledger::open(&dir, session);
+        for index in 0..count {
+            let decision_id = format!("d{index}");
+            ledger.note_decision(CompressionDecision {
+                decision_id: decision_id.clone(),
+                turn: index as u64,
+                batch: 0,
+                sequence: index as u64,
+                recorded_at_ms: 1_000 + index as u64,
+                file_identity: format!("/a{index}.rs"),
+                content_fingerprint: "v1".to_string(),
+                language: "rust".to_string(),
+                strategy: "skeleton".to_string(),
+                profile: "default".to_string(),
+                tokens_in: 10_000,
+                tokens_out: 1_000,
+                elided_ranges: vec![ElidedRange {
+                    start_line: 2,
+                    end_line: 90,
+                }],
+            });
+            // Recovery cost >= gross saving: the shape that earns `disabled`.
+            ledger.note_recovery(Recovery {
+                path: format!("/a{index}.rs"),
+                tokens: 9_000,
+                duration_ms: 0,
+                decision_id: Some(decision_id),
+                kind: Some(RecoveryKind::Targeted),
+                confidence: Some(Confidence::High),
+                turn: Some(index as u64),
+                batch: Some(1),
+            });
+        }
+        drop(ledger);
+        // Seed the epoch at 0 so the decisions above (t >= 1_000) fall after it;
+        // a fresh `refresh` would otherwise open its epoch at `now` and discard
+        // every earlier observation — see `reset_survives_a_later_refresh`.
+        ctk_hook::adaptive_state::reset(&dir, 0).unwrap();
+        let state = ctk_hook::adaptive_state::refresh(&dir, 2_000);
+        let key = ctk_hook::adaptive::bucket_key("rust", 10_000, "skeleton");
+        (
+            ctk_hook::adaptive_state::recommendation(&state, &key),
+            state
+                .buckets
+                .get(&key)
+                .map(|b| b.outcomes.len())
+                .unwrap_or(0),
+            temp,
+        )
+    };
+
+    let (seven, observed, _keep) = seed(7, "seven");
+    assert_eq!(observed, 7, "all seven observations should be collected");
+    assert_eq!(
+        seven,
+        Recommendation::One,
+        "seven observations are below the minimum and must not move the threshold"
+    );
+    assert_eq!(seven.effective_threshold(2_000), 2_000);
+
+    let (eight, observed, _keep) = seed(8, "eight");
+    assert_eq!(observed, 8);
+    assert_eq!(
+        eight,
+        Recommendation::Disabled,
+        "the eighth observation is what lets the policy act"
+    );
+}

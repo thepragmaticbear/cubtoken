@@ -5,9 +5,18 @@ pub fn status(json: bool) -> Result<(), String> {
     let cfg = ctk_hook::Config::try_load_for(&root)
         .map_err(|error| format!("adaptive status failed: {error}"))?;
     let state = ctk_hook::adaptive_state::load(&root.join(".cubtoken"), now_ms());
+    // The policy learns only from ledger-recorded decisions, so statistics
+    // being off makes any non-`off` mode a silent no-op. Report the inputs
+    // rather than the mode alone: an experiment has to be able to prove which
+    // policy its arm actually ran.
+    let learning_enabled =
+        cfg.adaptive.mode != ctk_compress::config::AdaptiveMode::Off && cfg.stats.ledger;
     if json {
         let output = serde_json::to_string_pretty(&serde_json::json!({
             "mode": cfg.adaptive.mode,
+            "stats_ledger": cfg.stats.ledger,
+            "read_threshold_tokens": cfg.read.threshold_tokens,
+            "learning_enabled": learning_enabled,
             "reset_at_ms": state.reset_at_ms,
             "policy_version": state.policy_version,
             "buckets": state.buckets,
@@ -17,6 +26,12 @@ pub fn status(json: bool) -> Result<(), String> {
         return Ok(());
     }
     println!("adaptive mode: {:?}", cfg.adaptive.mode);
+    if cfg.adaptive.mode != ctk_compress::config::AdaptiveMode::Off && !cfg.stats.ledger {
+        println!(
+            "warning: stats.ledger is false — the policy learns only from recorded \
+             decisions, so this mode cannot collect observations or change a threshold"
+        );
+    }
     println!(
         "reset epoch: {} | policy v{}",
         state.reset_at_ms, state.policy_version
