@@ -159,12 +159,12 @@ fn governor_p95_by_ledger_size() {
             },
         );
 
-        // The per-Read cost of safe mode, in two parts. The state snapshot is
-        // cheap; the threshold preview is not. `effective_read_threshold` calls
-        // `preview_read`, which runs a full tree-sitter parse with no size
-        // gate — so in safe mode every non-targeted Read pays a parse, even
-        // one far under the threshold that will never be compressed, and a
-        // Read that IS compressed parses the same content twice.
+        // The per-Read state snapshot safe mode loads: cheap.
+        //
+        // The row after it is NOT on the Read path any more. `preview_content`
+        // is now reached only by `ctk adaptive explain`; the hook parses once,
+        // inside `ReadCandidate::parse`, and hands that parse to the
+        // compressor. It is kept because `explain` still pays it.
         measure(
             &mut rows,
             records,
@@ -180,7 +180,7 @@ fn governor_p95_by_ledger_size() {
             &mut rows,
             records,
             category,
-            "safe-mode threshold preview (tree-sitter)",
+            "explain preview (tree-sitter)",
             iterations,
             || {
                 std::hint::black_box(
@@ -319,37 +319,33 @@ fn governor_p95_by_ledger_size() {
         );
     }
 
-    // Per-tool-call work and per-turn work have very different frequencies, so
-    // reporting one worst number over both would misrepresent the cost.
-    const PER_TURN: &[&str] = &["rebuild (adaptive refresh)"];
-    let worst = |category: &str, per_turn: bool| {
+    // What the spec's targets actually cover is governor OVERHEAD — what
+    // adaptive mode adds over static — not the compressor's own work, which
+    // runs whether or not this feature exists. Report it that way.
+    let find = |operation: &str| {
         rows.iter()
-            .filter(|row| row.category == category && PER_TURN.contains(&row.operation) == per_turn)
+            .find(|row| row.operation == operation)
+            .map(|row| row.p95_ms)
+            .unwrap_or(f64::NAN)
+    };
+    let per_read_overhead =
+        find("whole Read through run_hook, safe") - find("whole Read through run_hook, static");
+    let rebuild = |category: &str| {
+        rows.iter()
+            .filter(|row| row.category == category && row.operation == "rebuild (adaptive refresh)")
             .fold(0.0_f64, |worst, row| worst.max(row.p95_ms))
     };
     println!(
-        "\nPer-tool-call p95: typical {:.3} ms (target 2 ms), large {:.3} ms (target 5 ms).",
-        worst("typical", false),
-        worst("large", false)
+        "\nGovernor overhead, p95:\n  per Read (safe minus static): {per_read_overhead:.3} ms \
+         (target 2 ms)\n  per turn, typical (rebuild): {:.3} ms (target 2 ms)\n  \
+         per turn, large (rebuild): {:.3} ms (target 5 ms)",
+        rebuild("typical"),
+        rebuild("large")
     );
     println!(
-        "Per-turn p95 (Stop/SessionEnd only): typical {:.3} ms (target 2 ms), \
-         large {:.3} ms (target 5 ms).",
-        worst("typical", true),
-        worst("large", true)
-    );
-
-    let worst_typical = rows
-        .iter()
-        .filter(|row| row.category == "typical")
-        .fold(0.0_f64, |worst, row| worst.max(row.p95_ms));
-    let worst_large = rows
-        .iter()
-        .filter(|row| row.category == "large")
-        .fold(0.0_f64, |worst, row| worst.max(row.p95_ms));
-    println!(
-        "\nWorst governor-only p95: typical (100-1,000 records) {worst_typical:.3} ms \
-         against a 2 ms target; large (5,000-10,000 records) {worst_large:.3} ms \
-         against a 5 ms target."
+        "\nWhole compressed Read, p95: static {:.3} ms, safe {:.3} ms. The static \
+         figure is the compressor, not the governor.",
+        find("whole Read through run_hook, static"),
+        find("whole Read through run_hook, safe")
     );
 }
