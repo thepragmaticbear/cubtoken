@@ -12,7 +12,7 @@ stays `off` by default regardless of outcome.
 | Field | Value |
 | --- | --- |
 | Governor baseline (frozen) | `3d4a3d5fda3e34302a3d2704d6b019da06f45f77` |
-| Commit under test | `b29375c13ac4f56d0e38ee1a1641eab039dd673c` |
+| Commit under test | `96ab8f3adbbd3489c0c527ef8a50e6b0df51071d` |
 | Branch | `feat/adaptive-governor-eval-spec-4b3ba0` |
 | Execution date | 2026-09-22 (UTC) |
 | Machine | Apple M5, arm64, macOS 27.0 |
@@ -23,7 +23,7 @@ The baseline commit is the in-progress governor imported verbatim from the
 dirty `main` checkout, so scored runs can name an immutable implementation.
 Later commits add acceptance coverage, the analysis contract, the performance
 drivers, the task matrix, and fixes for four defects found by adversarial
-review. **The comparison baseline is therefore `b29375c`, not `3d4a3d5`** —
+review. **The comparison baseline is therefore `96ab8f3`, not `3d4a3d5`** —
 runtime behaviour changed. No run had been scored against the older one, so
 nothing is invalidated, but any further runtime change moves it again.
 
@@ -33,7 +33,7 @@ nothing is invalidated, but any further runtime change moves it again.
 
 ### Repository verification: PASS
 
-Run at `b29375c` on the machine above.
+Run at `96ab8f3` on the machine above.
 
 | Command | Result |
 | --- | --- |
@@ -41,7 +41,7 @@ Run at `b29375c` on the machine above.
 | `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` | exit 0 |
 | `cargo test --locked --workspace --all-features` | exit 0 — **147 passed, 0 failed, 2 ignored** |
 | `cargo audit --deny warnings` | exit 0 |
-| `python3 scripts/evaluate_governor.py --self-test` | exit 0 — 17/17 checks |
+| `python3 scripts/evaluate_governor.py --self-test` | exit 0 — **25/25 checks** |
 
 The two ignored tests are the performance drivers, run explicitly in gate 5.
 Test count rose from 134 at the frozen baseline to 147.
@@ -177,11 +177,11 @@ task is done and pass after — rather than assumed:
 
 | Task | Family | Check validated |
 | --- | --- | --- |
-| `t1-large-file-one-function` | Skeleton navigation + small recovery | Fails at `fc6d7d5` (1 of 2 tests), passes after the change. |
-| `t2-multi-file-trace` | Repeated reads, broad context | Fails with no `TRACE.md`, fails on an out-of-order chain, passes on a correct one. |
+| `t1-large-file-one-function` | Skeleton navigation + small recovery | Fails at `fc6d7d5`, passes after the change. Its second test was **tautological** (`is_some()` vs `is_some()`) until review; now compares the `Lang` variant and catches a mutated mapping. |
+| `t2-multi-file-trace` | Repeated reads, broad context | **Was unpassable** — the chain named two identifiers that do not exist at the pinned revision. Corrected and re-validated against a real export of `fc6d7d5`. |
 | `t3-repair-omitted-detail` | Insufficient context as a correctness failure | Fails at the buggy parent `2268a77` (both `doctor` and `stats` subdirectory tests), passes at the fix `d6ccb0f` (32 tests). |
 | `t4-edit-then-read` | Edit protection | Fails before, fails on a definition-only rename, passes on a complete one. |
-| `t5-unparseable-source` | Fallback elision | Fails with no audit, fails on a wrong default, passes on a correct one. |
+| `t5-unparseable-source` | Fallback elision | Fails with no audit, fails on a wrong default, passes on a correct one. Wrong-default detection used **containment** until review, so `12000` satisfied a documented `2000`; now compares for equality. |
 
 Validating rather than assuming caught a broken task. `t5` originally asked for
 a README configuration section that `fc6d7d5`'s README **already contains**, so
@@ -193,6 +193,11 @@ hatch, which is the fallback behaviour that family exists to exercise.
 
 `t3` is the strongest correctness signal: the check is the upstream fix's own
 test suite, written before this evaluation existed and never shown to the agent.
+Review found it was nonetheless **solvable without reading the source** — task
+checkouts were full clones, and a clone at `2268a77` still carries the fix
+commit `d6ccb0f` in its object store, so the answer sat in `git log`. Checkouts
+are now history-stripped exports and checks needing history read from a separate
+reference clone.
 
 ---
 
@@ -212,88 +217,128 @@ Two outcomes must not be misread as successes when the runs happen:
 
 ## Gate 5 — Performance: PARTIAL
 
-Measured at `de1fe7e`, release build, p95 over repeated samples. Fixture sizes
-**100 and 1,000 records are "typical" (2 ms target); 5,000 and 10,000 are
-"large" (5 ms target)**, as the spec requires be stated explicitly.
+Measured at `96ab8f3`, release build. Fixture sizes **100 and 1,000 records
+are "typical" (2 ms target); 5,000 and 10,000 are "large" (5 ms target)**, as
+the spec requires be stated explicitly.
 
-### Bottleneck found and fixed
+### Two methodology defects, both corrected
 
 The first run measured `adaptive_state::refresh` at **17.891 ms p95 at 10,000
-records** against a 5 ms target. It scanned every recovery once per decision —
-O(decisions x recoveries). Grouping recoveries by decision id in a single pass
-brings it to 5.796 ms. The aggregation it had to preserve was pinned by a test
-first.
+records**. It scanned every recovery once per decision — O(decisions x
+recoveries). Grouping recoveries by decision id in a single pass fixed it. The
+aggregation it had to preserve was pinned by a test first.
 
-### Governor-only cost (p95)
+The second defect was in the measurement itself, found by review: sample counts
+were 10 for the large sizes, and nearest-rank gives `ceil(10 * 0.95) = 10`, so
+the reported "p95" **was the maximum of ten samples**. An independent run of
+the same driver on the same machine produced 7.06 to 28.64 ms for the figure
+first recorded here as 5.796 — a 4x spread straddling the pass/fail line. The
+earlier table was one lucky quiet run wearing a percentile's name.
 
-| records | category | operation | p95 ms | iterations |
-| --- | --- | --- | --- | --- |
-| 100 | typical | replay (Ledger::open) | 0.124 | 200 |
-| 100 | typical | policy load (adaptive load) | 0.001 | 200 |
-| 100 | typical | lookup (is_protected) | 0.000 | 2000 |
-| 100 | typical | attribution (classify) | 0.000 | 2000 |
-| 100 | typical | append (note_saving) | 0.142 | 200 |
-| 100 | typical | rebuild (adaptive refresh) | 0.309 | 40 |
-| 1000 | typical | replay (Ledger::open) | 0.468 | 200 |
-| 1000 | typical | policy load (adaptive load) | 0.001 | 200 |
-| 1000 | typical | lookup (is_protected) | 0.000 | 2000 |
-| 1000 | typical | attribution (classify) | 0.000 | 2000 |
-| 1000 | typical | append (note_saving) | 0.125 | 200 |
-| 1000 | typical | rebuild (adaptive refresh) | 0.932 | 40 |
-| 5000 | large | replay (Ledger::open) | 1.904 | 40 |
-| 5000 | large | policy load (adaptive load) | 0.001 | 40 |
-| 5000 | large | lookup (is_protected) | 0.000 | 400 |
-| 5000 | large | attribution (classify) | 0.000 | 400 |
-| 5000 | large | append (note_saving) | 0.106 | 40 |
-| 5000 | large | rebuild (adaptive refresh) | 3.130 | 10 |
-| 10000 | large | replay (Ledger::open) | 3.722 | 40 |
-| 10000 | large | policy load (adaptive load) | 0.001 | 40 |
-| 10000 | large | lookup (is_protected) | 0.000 | 400 |
-| 10000 | large | attribution (classify) | 0.000 | 400 |
-| 10000 | large | append (note_saving) | 0.099 | 40 |
-| 10000 | large | rebuild (adaptive refresh) | 5.796 | 10 |
+Sample counts are now >= 100 everywhere, and min and median are reported beside
+p95 so a noisy measurement is visible rather than silently becoming the result.
+The distributions below are tight, which is what makes them usable.
+
+### Governor-only cost
+
+| records | category | operation | min ms | median ms | p95 ms | iterations |
+| --- | --- | --- | --- | --- | --- | --- |
+| 100 | typical | replay (Ledger::open) | 0.116 | 0.149 | 0.197 | 200 |
+| 100 | typical | policy load (adaptive load) | 0.001 | 0.001 | 0.001 | 200 |
+| 100 | typical | lookup (is_protected) | 0.000 | 0.000 | 0.000 | 2000 |
+| 100 | typical | attribution (classify) | 0.000 | 0.000 | 0.000 | 2000 |
+| 100 | typical | append (note_saving) | 0.087 | 0.112 | 0.160 | 200 |
+| 100 | typical | rebuild (adaptive refresh) | 0.259 | 0.280 | 0.359 | 200 |
+| 1000 | typical | replay (Ledger::open) | 0.390 | 0.414 | 0.444 | 200 |
+| 1000 | typical | policy load (adaptive load) | 0.001 | 0.001 | 0.001 | 200 |
+| 1000 | typical | lookup (is_protected) | 0.000 | 0.000 | 0.000 | 2000 |
+| 1000 | typical | attribution (classify) | 0.000 | 0.000 | 0.000 | 2000 |
+| 1000 | typical | append (note_saving) | 0.074 | 0.104 | 0.148 | 200 |
+| 1000 | typical | rebuild (adaptive refresh) | 0.762 | 0.809 | 0.915 | 200 |
+| 5000 | large | replay (Ledger::open) | 1.779 | 1.840 | 1.880 | 100 |
+| 5000 | large | policy load (adaptive load) | 0.001 | 0.001 | 0.001 | 100 |
+| 5000 | large | lookup (is_protected) | 0.000 | 0.000 | 0.000 | 1000 |
+| 5000 | large | attribution (classify) | 0.000 | 0.000 | 0.000 | 1000 |
+| 5000 | large | append (note_saving) | 0.074 | 0.091 | 0.108 | 100 |
+| 5000 | large | rebuild (adaptive refresh) | 2.974 | 3.074 | 3.173 | 100 |
+| 10000 | large | replay (Ledger::open) | 3.491 | 3.622 | 3.741 | 100 |
+| 10000 | large | policy load (adaptive load) | 0.001 | 0.001 | 0.001 | 100 |
+| 10000 | large | lookup (is_protected) | 0.000 | 0.000 | 0.000 | 1000 |
+| 10000 | large | attribution (classify) | 0.000 | 0.000 | 0.000 | 1000 |
+| 10000 | large | append (note_saving) | 0.085 | 0.101 | 0.126 | 100 |
+| 10000 | large | rebuild (adaptive refresh) | 5.799 | 5.968 | 6.072 | 100 |
+
+Per-tool-call p95: typical 0.444 ms (target 2 ms), large 3.741 ms (target 5 ms).
+Per-turn p95 (Stop/SessionEnd only): typical 0.915 ms (target 2 ms), large 6.072 ms (target 5 ms).
+
+Worst governor-only p95: typical (100-1,000 records) 0.915 ms against a 2 ms target; large (5,000-10,000 records) 6.072 ms against a 5 ms target.
 
 Reported per frequency, because `refresh` fires only on `Stop` and `SessionEnd`
 — once per turn — while the Read path pays `Ledger::open` plus a small state
-load on every call. One combined worst-case number would misrepresent both.
+load on every call.
 
 | Path | Frequency | Typical p95 | Large p95 | Target | Verdict |
 | --- | --- | --- | --- | --- | --- |
-| Per tool call | every matched tool call | 0.468 ms | 3.722 ms | 2 / 5 ms | **PASS** |
-| Per turn (rebuild) | `Stop`, `SessionEnd` | 0.932 ms | 5.796 ms | 2 / 5 ms | **FAIL at 10,000** |
+| Per tool call | every matched tool call | 0.444 ms | 3.741 ms | 2 / 5 ms | **PASS** |
+| Per turn (rebuild) | `Stop`, `SessionEnd` | 0.915 ms | 6.072 ms | 2 / 5 ms | **FAIL at 10,000** |
 
 `policy load` — the per-Read cost safe mode adds — is 0.001 ms at every size.
-It reads the small state snapshot, not the ledgers.
 
-### Process cost (p95), excluded from the governor targets
+### Process cost, excluded from the governor targets
 
-| operation | p95 ms | iterations |
-| --- | --- | --- |
-| startup (ctk --version) | 2.086 | 30 |
-| end-to-end (ctk hook), 1,000 ledger records | 4.176 | 30 |
+| operation | min ms | median ms | p95 ms | iterations |
+| --- | --- | --- | --- | --- |
+| startup (ctk --version) | 1.197 | 1.355 | 2.084 | 100 |
+| end-to-end (ctk hook), 1,000 ledger records | 3.607 | 3.848 | 4.124 | 100 |
 
-Process startup is ~2.1 ms of the ~4.2 ms end-to-end figure, so the governor's
-own share at 1,000 records is roughly 2 ms. These are reported separately so
-spawn cost is not attributed to the governor.
+Startup is ~1.4 ms median of the ~3.8 ms end-to-end figure, so the governor's
+own share at 1,000 records is roughly 2.5 ms. Reported separately so spawn cost
+is not attributed to the governor.
 
 ### The remaining miss
 
-`rebuild` at 10,000 records is **5.796 ms against a 5 ms target**. At 5,000
-records it is 3.130 ms and passes. The remaining cost is JSON parsing, not
-algorithm: `refresh` walks **every** `session-*.jsonl` in the project via
-`Ledger::load_all`, so it scales with the whole `.cubtoken/` directory rather
-than the current session, and that directory is never pruned. A long-lived
-project accumulates past it.
+`rebuild` at 10,000 records is **6.072 ms p95 against a 5 ms target**, with a
+median of 5.968 and a minimum of 5.799 — consistently over, not a tail artifact.
+At 5,000 records it is 3.173 ms and passes.
 
-No index or snapshot was added, per the spec's instruction not to add one unless
-a measurement requires it. The one-pass fix brought a 3.6x improvement and
-cleared everything except the top of the band. Closing the last 0.8 ms means
-either bounding what `load_all` reads — retention, or a per-session summary —
-which is a design change belonging in its own commit, not a quiet addition here.
+The cause is JSON parsing, not algorithm: `refresh` walks **every**
+`session-*.jsonl` in the project via `Ledger::load_all`, so it scales with the
+whole `.cubtoken/` directory rather than the current session, and that
+directory is never pruned. A long-lived project accumulates past it.
 
-Caveat: these are single-machine numbers on an Apple M5. CI runs Ubuntu, macOS,
-and Windows; the targets should be confirmed on the slowest of them before this
-gate is called closed.
+No index or snapshot was added, per the spec's instruction not to add one
+unless a measurement requires it. Bounding what `load_all` reads — retention,
+or a per-session summary — is a design change belonging in its own commit, so
+the number is reported against the stated boundary rather than the boundary
+being moved to clear it.
+
+Caveat: single-machine numbers on an Apple M5. CI runs Ubuntu, macOS, and
+Windows; confirm on the slowest before calling this gate closed.
+
+---
+
+## What review caught that self-review did not
+
+Three rounds of checking preceded the code review: a verification gate,
+both-directions validation of every task check, and mutation testing of the
+analysis self-test. The review still found three miscalibrated instruments,
+and the pattern in all three is the same — **I validated the instrument against
+something I wrote, rather than against the thing it would measure.**
+
+| Found | How my own checking missed it |
+| --- | --- |
+| `t2` unpassable at its pinned revision | I validated the checker with a `TRACE.md` I wrote to contain the identifiers. I never ran it against `fc6d7d5`, where two of them do not exist. |
+| "p95" was the maximum of ten samples | I read the p95 helper and the numbers looked plausible. I never ran the driver twice and compared. |
+| `t1`'s guard compared `is_some()` to `is_some()` | I mutation-tested the *analysis* self-test and the `refresh` rewrite, but not the task checks. |
+
+Two earlier instances of the same class are recorded above: the `t5` check that
+passed on untouched code, and a defect-3 reproduction that passed against broken
+code. Five in total, all caught, none by the same method twice.
+
+The concrete process changes: task checks are validated against a real export
+of the pinned revision rather than a fixture; percentile figures state their
+sample count and report median and minimum beside p95; and every check the
+harness relies on now has a recorded break attempt.
 
 ---
 
