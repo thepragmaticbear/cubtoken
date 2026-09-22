@@ -12,7 +12,7 @@ stays `off` by default regardless of outcome.
 | Field | Value |
 | --- | --- |
 | Governor baseline (frozen) | `3d4a3d5fda3e34302a3d2704d6b019da06f45f77` |
-| Commit under test | `de1fe7ed8f465b1bd5d87d0dce4cf8bd0640be3c` |
+| Commit under test | `b29375c13ac4f56d0e38ee1a1641eab039dd673c` |
 | Branch | `feat/adaptive-governor-eval-spec-4b3ba0` |
 | Execution date | 2026-09-22 (UTC) |
 | Machine | Apple M5, arm64, macOS 27.0 |
@@ -21,10 +21,11 @@ stays `off` by default regardless of outcome.
 
 The baseline commit is the in-progress governor imported verbatim from the
 dirty `main` checkout, so scored runs can name an immutable implementation.
-Four later commits add acceptance coverage, the analysis contract, the
-performance drivers with one runtime fix, and the task matrix. This receipt
-itself adds documentation only. **Any further runtime change creates a new
-comparison baseline and invalidates runs scored against this one.**
+Later commits add acceptance coverage, the analysis contract, the performance
+drivers, the task matrix, and fixes for four defects found by adversarial
+review. **The comparison baseline is therefore `b29375c`, not `3d4a3d5`** —
+runtime behaviour changed. No run had been scored against the older one, so
+nothing is invalidated, but any further runtime change moves it again.
 
 ---
 
@@ -32,18 +33,18 @@ comparison baseline and invalidates runs scored against this one.**
 
 ### Repository verification: PASS
 
-Run at `de1fe7e` on the machine above.
+Run at `b29375c` on the machine above.
 
 | Command | Result |
 | --- | --- |
 | `cargo fmt --check` | exit 0 |
 | `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` | exit 0 |
-| `cargo test --locked --workspace --all-features` | exit 0 — **143 passed, 0 failed, 2 ignored** |
+| `cargo test --locked --workspace --all-features` | exit 0 — **147 passed, 0 failed, 2 ignored** |
 | `cargo audit --deny warnings` | exit 0 |
 | `python3 scripts/evaluate_governor.py --self-test` | exit 0 — 17/17 checks |
 
 The two ignored tests are the performance drivers, run explicitly in gate 5.
-Test count rose from 134 at the frozen baseline to 143.
+Test count rose from 134 at the frozen baseline to 147.
 
 ### Acceptance coverage added: PASS
 
@@ -65,6 +66,36 @@ deleting `PostToolBatch` from `plugins/cubtoken/hooks/hooks.json` makes it fail.
 That matters because attribution uses `PostToolBatch` as its batch boundary, so
 a plugin install missing it silently downgrades every recovery below the
 confidence the policy trains on.
+
+### Four defects found by adversarial review: FIXED
+
+A reproduction script exercising concurrency and filesystem edge cases found
+four defects, all in the frozen baseline rather than in the evaluation work
+layered on it. Each now has a test that fails before its fix.
+
+| # | Defect | Severity | Fix |
+| --- | --- | --- | --- |
+| 1 | Edit protection lost whenever the ledger's advisory lock was unavailable. Every hook call is a fresh process, so the in-memory record died and the next Read compressed an already-edited file. | **Critical** | Edit records append whenever the directory is safe, lock or not; `writable` tracked apart from `lock`. |
+| 2 | The data directory was checked for being a symlink, the session file inside it was not — a `session-*.jsonl` symlink redirected appends into its target. | **Critical** | Refuse to append through a symlinked session file. |
+| 3 | `refresh` wrote back the reset epoch it had loaded, silently undoing a concurrent `adaptive reset`. | **Important** | Re-read the epoch before publishing; abandon the refresh if a reset moved it. |
+| 4 | `adaptive explain` reported a recommendation as the decision in every mode, though only `safe` acts on one — so `observe` announced "disabled" for a file the next Read would compress. | **Important** | Report the mode and the threshold the hook will actually use. |
+
+Defect 1 is worse than a race. The lock is a `create_new` lockfile removed on
+`Drop`, so a single stale lockfile from a killed process disables edit
+protection for the rest of the session — silently, because the hook always
+exits 0. This is the Edit-correctness hazard the protection exists to prevent.
+
+Two lessons are recorded rather than smoothed over:
+
+- My own `reset_survives_a_later_refresh` covers only the **sequential** case
+  and passed throughout. It gave false confidence about defect 3, which is
+  concurrent. The replacement holds the window open deterministically with a
+  FIFO instead of relying on timing.
+- My first attempt at a reproduction for defect 3 **passed against the broken
+  code** — it was vacuous, because `refresh`'s `now_ms` argument is only used
+  when no state file exists. It was rewritten rather than kept. This is the
+  same failure mode as the t5 task check, and it is why every check here is
+  validated in both directions.
 
 ### Defect found and fixed: configuration trap
 
