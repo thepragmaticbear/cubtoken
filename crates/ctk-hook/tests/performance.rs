@@ -28,6 +28,15 @@ const SIZES: &[(usize, &str)] = &[
     (10_000, "large"),
 ];
 
+/// The fixture the safe-mode preview parses: one signature over a fat body,
+/// the shape a skeleton actually compresses.
+fn source() -> String {
+    format!(
+        "pub fn large() {{\n{}\n}}\n",
+        "    let value = 42;\n".repeat(1_500)
+    )
+}
+
 /// Nearest-rank percentile. Note the sample-count requirement: with n = 10,
 /// `ceil(10 * 0.95) = 10`, so "p95" would be the maximum sample and a single
 /// scheduling hiccup becomes the reported figure. Callers use n >= 100 so the
@@ -150,9 +159,12 @@ fn governor_p95_by_ledger_size() {
             },
         );
 
-        // The per-Read cost of safe mode: it reads the small state snapshot,
-        // not the ledgers. Measured separately because it runs far more often
-        // than `refresh`, which only fires on Stop and SessionEnd.
+        // The per-Read cost of safe mode, in two parts. The state snapshot is
+        // cheap; the threshold preview is not. `effective_read_threshold` calls
+        // `preview_read`, which runs a full tree-sitter parse with no size
+        // gate — so in safe mode every non-targeted Read pays a parse, even
+        // one far under the threshold that will never be compressed, and a
+        // Read that IS compressed parses the same content twice.
         measure(
             &mut rows,
             records,
@@ -161,6 +173,19 @@ fn governor_p95_by_ledger_size() {
             iterations,
             || {
                 std::hint::black_box(ctk_hook::adaptive_state::load(&dir, 500).buckets.len());
+            },
+        );
+        let preview_source = source();
+        measure(
+            &mut rows,
+            records,
+            category,
+            "safe-mode threshold preview (tree-sitter)",
+            iterations,
+            || {
+                std::hint::black_box(
+                    ctk_compress::read::preview_content("large.rs", &preview_source).tokens_in,
+                );
             },
         );
 
@@ -223,6 +248,59 @@ fn governor_p95_by_ledger_size() {
                 std::hint::black_box(ctk_hook::adaptive_state::refresh(&dir, 500).buckets.len());
             },
         );
+    }
+
+    // The number that actually matters for safe mode: one whole compressed
+    // Read through `run_hook`, static versus safe. Safe pays the threshold
+    // preview on top, and that preview parses the same content the compressor
+    // is about to parse again.
+    {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("large.rs");
+        std::fs::write(&path, source()).unwrap();
+        let content = std::fs::read_to_string(&path).unwrap();
+        let lines = content.lines().count();
+        let payload = serde_json::json!({
+            "hook_event_name": "PostToolUse", "tool_name": "Read",
+            "session_id": "endtoend", "cwd": temp.path(),
+            "tool_input": {"file_path": &path},
+            "tool_response": {"type": "text", "file": {
+                "filePath": &path, "content": content, "numLines": lines,
+                "startLine": 1, "totalLines": lines
+            }}
+        })
+        .to_string();
+        // A big file that still sits UNDER the threshold: it can never
+        // compress, so safe mode should cost what static costs. The parse the
+        // old code ran scaled with file size, so this — not a three-line file
+        // — is where skipping it matters.
+        let under = "[read]\nthreshold_tokens = 1000000\nnever_compress = []";
+        for (label, raw) in [
+            ("under-threshold Read, static", under.to_string()),
+            (
+                "under-threshold Read, safe",
+                format!("{under}\n[adaptive]\nmode = \"safe\""),
+            ),
+        ] {
+            let cfg = ctk_hook::Config::load_from(None, Some(&raw));
+            measure(&mut rows, 0, "per-Read", label, 200, || {
+                std::hint::black_box(ctk_hook::run_hook(&payload, &cfg));
+            });
+        }
+
+        let base = "[read]\nthreshold_tokens = 10\nnever_compress = []";
+        for (label, raw) in [
+            ("whole Read through run_hook, static", base.to_string()),
+            (
+                "whole Read through run_hook, safe",
+                format!("{base}\n[adaptive]\nmode = \"safe\""),
+            ),
+        ] {
+            let cfg = ctk_hook::Config::load_from(None, Some(&raw));
+            measure(&mut rows, 0, "per-Read", label, 200, || {
+                std::hint::black_box(ctk_hook::run_hook(&payload, &cfg));
+            });
+        }
     }
 
     println!("\n## Governor-only cost (p95)\n");
