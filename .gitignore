@@ -2,3 +2,7 @@ target/
 .cubtoken/
 .claude/settings.json
 .claude/settings.local.json
+
+# Python bytecode from scripts/
+__pycache__/
+*.py[cod]
