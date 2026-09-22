@@ -1,5 +1,20 @@
 use ctk_hook::{run_hook, Config};
 
+/// A writable project for recorded payloads to run in.
+///
+/// Fixtures carry the recording machine's `cwd` (`/private/tmp/stk-capture`).
+/// The session ledger lives under that project root, and a Read passes through
+/// whenever its ledger can't be opened: without edit-protection state it
+/// mustn't compress. Linux has no `/private` and can't create one, so on CI every
+/// Read fixture passed through. `large_read_is_compressed_with_escape_hatch`
+/// failed, and the pass-through tests below passed for the wrong reason.
+fn project() -> &'static std::path::Path {
+    // ponytail: one temp dir per test binary, never removed (statics don't drop).
+    // Swap for a per-test TempDir if isolation between these tests ever matters.
+    static DIR: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| tempfile::tempdir().unwrap()).path()
+}
+
 fn fixture(name: &str) -> String {
     static SESSION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let raw = std::fs::read_to_string(format!(
@@ -12,6 +27,7 @@ fn fixture(name: &str) -> String {
         "fixture-{}",
         SESSION.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     ));
+    payload["cwd"] = serde_json::json!(project());
     payload.to_string()
 }
 
