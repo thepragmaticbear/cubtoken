@@ -1,0 +1,120 @@
+{
+  "schema_version": 1,
+  "note": "Task manifest for the adaptive governor evaluation. Every task names an immutable revision, the exact prompt, its setup, a time limit, and a success check the agent never sees. Run procedure: tests/evaluation/README.md. Every check in checks/ was validated to fail before the task is done and pass after.",
+  "repetitions": 2,
+  "arms": [
+    "disabled",
+    "static",
+    "observe",
+    "safe"
+  ],
+  "repositories": {
+    "cubtoken": {
+      "clone_url": "https://github.com/thepragmaticbear/cubtoken.git",
+      "disposable": true,
+      "credentials": "none; public repository, no secrets in tree"
+    }
+  },
+  "tasks": [
+    {
+      "task_id": "t1-large-file-one-function",
+      "family": "Find and modify one function in a large file",
+      "why": "Exercises useful skeleton navigation followed by a small targeted recovery: the agent must locate one match arm inside the largest file in the tree and quote it exactly.",
+      "repository": "cubtoken",
+      "revision": "fc6d7d5",
+      "setup": [
+        "Export the pinned revision without history into a fresh directory: `git -C $REFERENCE archive <revision> | tar -x -C <dir>`.",
+        "Write the arm's .cubtoken.toml into the checkout root, replacing any that ships with it.",
+        "cargo build --locked so the first task turn is not dominated by a cold build."
+      ],
+      "prompt": "In crates/ctk-sitter/src/lib.rs, extension resolution maps TypeScript-family file extensions onto one grammar. Extend it so that .mts and .cts resolve the same way .ts and .mjs already do. Change nothing else.",
+      "time_limit_ms": 900000,
+      "check": {
+        "command": "cp $CHECKS/t1_extensions.rs crates/ctk-sitter/tests/t1_extensions.rs && cargo test --locked -p ctk-sitter --test t1_extensions",
+        "independent": "The assertion file is copied in after the agent stops; the agent never sees it and cannot edit it.",
+        "passes_when": "exit status 0"
+      }
+    },
+    {
+      "task_id": "t2-multi-file-trace",
+      "family": "Trace behavior across multiple files",
+      "why": "Exercises repeated reads and broader context needs across all four crates. This is the task expected to accumulate the most same-bucket observations, so it is the one most likely to let safe mode change a decision.",
+      "repository": "cubtoken",
+      "revision": "fc6d7d5",
+      "setup": [
+        "Export the pinned revision without history into a fresh directory: `git -C $REFERENCE archive <revision> | tar -x -C <dir>`.",
+        "Write the arm's .cubtoken.toml into the checkout root, replacing any that ships with it."
+      ],
+      "prompt": "A file the model edited earlier in a session is never compressed again. Write TRACE.md describing the complete path that produces that behaviour, from the hook's stdin payload to the pass-through decision. Name every function and file involved, in call order, and state where the protection is persisted and where it is read back.",
+      "time_limit_ms": 900000,
+      "check": {
+        "command": "python3 $CHECKS/t2_trace.py TRACE.md",
+        "independent": "Checks TRACE.md for the required call chain by identifier. The agent is not told which identifiers are checked.",
+        "passes_when": "exit status 0"
+      }
+    },
+    {
+      "task_id": "t3-repair-omitted-detail",
+      "family": "Repair a bug requiring omitted implementation details",
+      "why": "The fix lives in function bodies a skeleton elides, so insufficient context becomes observable as a correctness failure rather than as a slower run. The check is the upstream fix's own test suite.",
+      "repository": "cubtoken",
+      "revision": "2268a77",
+      "setup": [
+        "Export the pinned revision WITHOUT history into a fresh directory: `git -C $REFERENCE archive 2268a77 | tar -x -C <dir>`. A full clone would carry the fix commit d6ccb0f in its object store, and the agent could read the answer from git log rather than from the source.",
+        "Write the arm's .cubtoken.toml into the checkout root.",
+        "cargo build --locked."
+      ],
+      "prompt": "Run from any subdirectory of a project, `ctk stats` reports no savings even when the hook has recorded them, and `ctk doctor` fails to find the installed hook and leaves a stray .cubtoken directory behind. Both commands should operate on the project the subdirectory belongs to. Fix this.",
+      "time_limit_ms": 1800000,
+      "check": {
+        "command": "git -C $REFERENCE show d6ccb0f:crates/ctk-cli/tests/stats.rs > crates/ctk-cli/tests/stats.rs && git -C $REFERENCE show d6ccb0f:crates/ctk-cli/tests/init.rs > crates/ctk-cli/tests/init.rs && cargo test --locked -p ctk-cli",
+        "independent": "Restores the tests the upstream fix (d6ccb0f) shipped, taken from a reference clone the agent never had. Written before this evaluation existed and never shown to it.",
+        "passes_when": "exit status 0"
+      }
+    },
+    {
+      "task_id": "t4-edit-then-read",
+      "family": "Make a change followed by additional reads",
+      "why": "Exercises edit protection: once the agent edits these files, every later Read of them must pass through uncompressed, in every arm.",
+      "repository": "cubtoken",
+      "revision": "fc6d7d5",
+      "setup": [
+        "Export the pinned revision without history into a fresh directory: `git -C $REFERENCE archive <revision> | tar -x -C <dir>`.",
+        "Write the arm's .cubtoken.toml into the checkout root.",
+        "cargo build --locked."
+      ],
+      "prompt": "Rename the public function `est_tokens` in crates/ctk-compress/src/estimate.rs to `estimate_tokens`, update every call site across the workspace, then re-read each file you changed and confirm no reference was missed. Leave the behaviour identical.",
+      "time_limit_ms": 1800000,
+      "check": {
+        "command": "python3 $CHECKS/t4_rename.py && cargo test --locked --workspace",
+        "independent": "Greps the tree for the old and new identifiers, then runs the pre-existing suite. Neither is authored by the agent.",
+        "passes_when": "exit status 0"
+      }
+    },
+    {
+      "task_id": "t5-unparseable-source",
+      "family": "Work with unsupported or unparseable source",
+      "why": "README.md is ~16 KB with no tree-sitter grammar, so it takes the head-and-tail elision fallback rather than a signature skeleton. The configuration table sits in the elided middle, so the task cannot be completed without using the escape hatch the compressed view advertises.",
+      "repository": "cubtoken",
+      "revision": "fc6d7d5",
+      "setup": [
+        "Export the pinned revision without history into a fresh directory: `git -C $REFERENCE archive <revision> | tar -x -C <dir>`.",
+        "Write the arm's .cubtoken.toml into the checkout root."
+      ],
+      "prompt": "README.md contains a table of the configuration keys cubtoken accepts. Write CONFIG_AUDIT.md listing every key that table documents, one per line, each with the default value the table gives it. List only keys the table documents.",
+      "time_limit_ms": 900000,
+      "check": {
+        "command": "python3 $CHECKS/t5_config_docs.py",
+        "independent": "Parses the README's own configuration table and asserts the audit accounts for every row with a matching default. Validated to fail on a missing audit, on a wrong default, and on invented keys; and to pass on a correct one.",
+        "passes_when": "exit status 0"
+      }
+    }
+  ],
+  "check_conventions": {
+    "cwd": "the task checkout root",
+    "CHECKS": "absolute path to tests/evaluation/checks in this repository; export it before running a check",
+    "note": "Checks are copied or invoked only after the agent has stopped. The agent is never shown them and never has them in its checkout while working.",
+    "REFERENCE": "absolute path to a full clone of the repository, used only by checks that need history. The agent's own checkout must not have it \u2014 see the history note.",
+    "history": "Task checkouts are history-stripped (`git archive <rev> | tar -x`). A full clone checked out at an older revision still contains later commits in its object store, so an agent can read the fix out of `git log` instead of the source. This matters most for t3, whose answer is a later commit in this same repository."
+  }
+}

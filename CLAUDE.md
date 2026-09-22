@@ -20,6 +20,8 @@ cargo test --locked -p ctk-compress   # one crate
 cargo test --locked -p ctk-hook --test end_to_end # recorded hook payloads
 cargo test --locked verbatim          # tests matching a name substring
 cargo insta review                    # review/accept snapshot changes (ctk-sitter uses insta)
+python3 scripts/evaluate_governor.py --self-test   # analysis-script checks; run before touching it
+cargo test --release -p ctk-hook --test performance -- --ignored --nocapture   # governor p95
 ```
 
 **Verification gate (must pass before claiming done — mirrors CI):**
