@@ -47,7 +47,7 @@ jobs:
       # artifact container, so download-artifact extracts it and the Windows
       # release ships loose ctk.exe/LICENSE/README.md instead of the .zip.
       # The .tar.gz targets are unaffected, which is why this hid until v0.1.0.
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: ${{ matrix.target }}
           path: ${{ matrix.artifact }}
